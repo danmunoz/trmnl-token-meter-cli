@@ -50,7 +50,7 @@ async function discoverJsonlFiles(dir: string, output: string[] = []): Promise<s
   return output;
 }
 
-export const eventDedupeKey = (event: UsageEvent): string =>
+const eventDedupeKey = (event: UsageEvent): string =>
   [
     event.session_id,
     event.timestamp.toISOString(),

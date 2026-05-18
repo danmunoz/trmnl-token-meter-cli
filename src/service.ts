@@ -291,7 +291,7 @@ export async function uninstallBackgroundService(
   if (options.removeRunner) await rm(config.serviceDir, { recursive: true, force: true });
 }
 
-export async function readServiceMetadata(config: CollectorConfig): Promise<ServiceMetadata | null> {
+async function readServiceMetadata(config: CollectorConfig): Promise<ServiceMetadata | null> {
   try {
     return JSON.parse(await readFile(config.serviceMetadataPath, "utf8")) as ServiceMetadata;
   } catch (error) {

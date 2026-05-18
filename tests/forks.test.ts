@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { buildAggregate } from "../src/aggregate.js";
-import { loadConfig } from "../src/config.js";
-import { readCodexUsage } from "../src/codex-log-reader.js";
+import { readJsonlUsageSource } from "../src/cost-sources/jsonl.js";
 
 const fixtureRoot = new URL("./fixtures/codex-jsonl/custom", import.meta.url).pathname;
 
 describe("fork-aware aggregation", () => {
   it("deduplicates cumulative counters per branch and emits ambiguity warnings", async () => {
-    const result = await readCodexUsage(loadConfig({ CODEX_HOME: fixtureRoot }));
-    const snapshot = buildAggregate(result.events, {
+    const result = await readJsonlUsageSource(
+      fixtureRoot,
+      "codex_sessions",
+      "codex_sessions_missing"
+    );
+    const snapshot = buildAggregate(result.records, {
       machineId: "mach",
       machineLabel: "Machine",
       codexHomeKind: "custom",

@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -62,10 +61,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
 export async function ensureCollectorDirs(config: CollectorConfig): Promise<void> {
   await mkdir(config.configDir, { recursive: true, mode: 0o700 });
   await mkdir(config.cacheDir, { recursive: true, mode: 0o700 });
-}
-
-export function codexHomeExists(config: CollectorConfig): boolean {
-  return existsSync(config.codexHome);
 }
 
 export async function saveCredential(path: string, credential: CollectorCredential): Promise<void> {

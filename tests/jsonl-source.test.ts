@@ -1,27 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "../src/config.js";
-import { discoverCodexJsonlFiles, readCodexUsage } from "../src/codex-log-reader.js";
 import { buildAggregate } from "../src/aggregate.js";
+import { readJsonlUsageSource } from "../src/cost-sources/jsonl.js";
 
 const fixtureRoot = new URL("./fixtures/codex-jsonl/default", import.meta.url).pathname;
 const nestedFixtureRoot = new URL("./fixtures/codex-jsonl/nested", import.meta.url).pathname;
 
-describe("Codex JSONL reader", () => {
+const readCodexFixture = (root: string) =>
+  readJsonlUsageSource(root, "codex_sessions", "codex_sessions_missing");
+
+describe("Codex JSONL source", () => {
   it("discovers jsonl files under the configured Codex home", async () => {
-    const config = loadConfig({ CODEX_HOME: fixtureRoot });
-    const files = await discoverCodexJsonlFiles(config);
-    expect(files.map((file) => file.split("/").pop()).sort()).toEqual([
-      "malformed.jsonl",
-      "session.jsonl"
-    ]);
+    const result = await readCodexFixture(fixtureRoot);
+
+    expect(result.status).toMatchObject({
+      kind: "codex_sessions",
+      enabled: true,
+      status: "read",
+      record_count: 3
+    });
   });
 
   it("normalizes token events and reports malformed lines generically", async () => {
-    const config = loadConfig({ CODEX_HOME: fixtureRoot });
-    const result = await readCodexUsage(config);
+    const result = await readCodexFixture(fixtureRoot);
 
-    expect(result.events).toHaveLength(3);
-    expect(result.events[2]?.cached_input_tokens).toBe(25);
+    expect(result.records).toHaveLength(3);
+    expect(result.records).toContainEqual(
+      expect.objectContaining({
+        input_tokens: 25,
+        cached_input_tokens: 25,
+        output_tokens: 10
+      })
+    );
     expect(result.warnings).toContainEqual({
       code: "malformed_records_skipped",
       severity: "warning",
@@ -31,37 +40,36 @@ describe("Codex JSONL reader", () => {
   });
 
   it("warns when Codex home is missing without exposing the path", async () => {
-    const result = await readCodexUsage(loadConfig({ CODEX_HOME: "/tmp/not-present-codex-home" }));
-    expect(result.events).toEqual([]);
+    const result = await readCodexFixture("/tmp/not-present-codex-home");
+
+    expect(result.records).toEqual([]);
     expect(result.warnings).toEqual([{ code: "codex_sessions_missing", severity: "warning" }]);
   });
 
   it("normalizes CodexBar-style event_msg token counts with turn context", async () => {
-    const result = await readCodexUsage(loadConfig({ CODEX_HOME: nestedFixtureRoot }));
+    const result = await readCodexFixture(nestedFixtureRoot);
 
-    expect(result.events).toHaveLength(3);
-    expect(result.events[0]).toMatchObject({
-      session_id: "nested-s1",
+    expect(result.records).toHaveLength(3);
+    expect(result.records[0]).toMatchObject({
       model: "gpt-5.4-codex",
       input_tokens: 100,
       cached_input_tokens: 20,
-      output_tokens: 50,
-      record_kind: "cumulative"
+      output_tokens: 50
     });
-    expect(result.events[1]).toMatchObject({
+    expect(result.records[1]).toMatchObject({
       model: "gpt-5.4-codex",
-      cached_input_tokens: 30,
-      record_kind: "cumulative"
+      input_tokens: 75,
+      cached_input_tokens: 10,
+      output_tokens: 30
     });
-    expect(result.events[2]).toMatchObject({
+    expect(result.records[2]).toMatchObject({
       model: "gpt-5.4-mini",
       input_tokens: 25,
       cached_input_tokens: 5,
-      output_tokens: 10,
-      record_kind: "delta"
+      output_tokens: 10
     });
 
-    const snapshot = buildAggregate(result.events, {
+    const snapshot = buildAggregate(result.records, {
       machineId: "mach",
       machineLabel: "Machine",
       codexHomeKind: "custom",

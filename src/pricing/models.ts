@@ -109,7 +109,7 @@ export const pricingCatalog: PricingModel[] = [
   }
 ] as const satisfies PricingModel[];
 
-export const normalizeModelName = (modelName: string): string =>
+const normalizeModelName = (modelName: string): string =>
   modelName.trim().toLowerCase().replace(/\s+/g, "-");
 
 export const displayModelName = (modelName: string): string => {
