@@ -1,0 +1,3 @@
+{"timestamp":"2026-05-15T11:00:00.000Z","session_id":"bad","last_token_usage":{"input_tokens":5,"output_tokens":5}
+not json
+{"timestamp":"2026-05-15T11:10:00.000Z","session_id":"empty","message":"no usage here"}

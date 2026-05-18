@@ -1,0 +1,3 @@
+{"timestamp":"2026-05-15T09:00:00.000Z","session_id":"s1","model":"gpt-5","last_token_usage":{"input_tokens":100,"cached_input_tokens":10,"output_tokens":50},"prompt":"CANARY_PROMPT_DO_NOT_UPLOAD","cwd":"/Users/danielmunoz/Repos/private-project"}
+{"timestamp":"2026-05-15T10:00:00.000Z","session_id":"s1","model":"gpt-5","last_token_usage":{"input_tokens":40,"cached_input_tokens":5,"output_tokens":25},"response":"CANARY_RESPONSE_DO_NOT_UPLOAD","command":"cat /Users/danielmunoz/.ssh/id_rsa"}
+{"timestamp":"2026-05-14T10:00:00.000Z","session_id":"s2","model":"unknown experimental model with spaces !","total_token_usage":{"input_tokens":25,"cached_input_tokens":40,"output_tokens":10},"tool_output":"CANARY_TOOL_OUTPUT_DO_NOT_UPLOAD"}
