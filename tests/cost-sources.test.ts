@@ -351,7 +351,7 @@ describe("local cost sources", () => {
 
   it("reads matched priority evidence without exposing row content", async () => {
     const root = await makeTempRoot();
-    const sqlite = (await new Function("specifier", "return import(specifier)")("node:sqlite")) as {
+    const sqlite = (await import("node:sqlite")) as {
       DatabaseSync: new (path: string) => {
         exec(sql: string): void;
         close(): void;

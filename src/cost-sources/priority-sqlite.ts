@@ -21,10 +21,7 @@ type DatabaseSyncConstructor = new (
 };
 
 const importSqlite = async (): Promise<{ DatabaseSync: DatabaseSyncConstructor }> => {
-  const dynamicImport = new Function("specifier", "return import(specifier)") as (
-    specifier: string
-  ) => Promise<{ DatabaseSync: DatabaseSyncConstructor }>;
-  return dynamicImport("node:sqlite");
+  return import("node:sqlite");
 };
 
 const stringValue = (value: unknown): string | null =>
