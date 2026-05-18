@@ -4,6 +4,8 @@ import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { CollectorCredential } from "./types.js";
 
+const DEFAULT_API_BASE_URL = "https://trmnl-token-meter-backend.trmnltkn.workers.dev";
+
 export interface CollectorConfig {
   apiBaseUrl: string;
   codexHome: string;
@@ -39,7 +41,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     env.CODEX_HOME && env.CODEX_HOME.trim() ? env.CODEX_HOME : join(homedir(), ".codex");
   const configDir = env.TRMNL_TOKEN_METER_CONFIG_DIR ?? defaultConfigDir();
   const cacheDir = env.TRMNL_TOKEN_METER_CACHE_DIR ?? defaultCacheDir();
-  const apiBaseUrl = env.TRMNL_TOKEN_METER_API_BASE_URL ?? "http://localhost:3000";
+  const apiBaseUrl = env.TRMNL_TOKEN_METER_API_BASE_URL ?? DEFAULT_API_BASE_URL;
   return {
     apiBaseUrl: apiBaseUrl.replace(/\/+$/, ""),
     codexHome: resolve(codexHome),

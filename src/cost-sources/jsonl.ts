@@ -226,10 +226,10 @@ export async function readJsonlUsageSource(
           : fileEvents.find((event) => event.session_id !== "unknown")?.session_id;
       parsedFiles.push({
         events: fileEvents,
-        sessionId,
-        parentId: context.parentId,
-        forkTimestamp: context.forkTimestamp,
-        snapshots: snapshotsFromEvents(fileEvents)
+        snapshots: snapshotsFromEvents(fileEvents),
+        ...(sessionId ? { sessionId } : {}),
+        ...(context.parentId ? { parentId: context.parentId } : {}),
+        ...(context.forkTimestamp ? { forkTimestamp: context.forkTimestamp } : {})
       });
     } catch {
       malformed += 1;

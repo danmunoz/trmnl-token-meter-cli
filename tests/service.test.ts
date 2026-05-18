@@ -13,9 +13,11 @@ import {
 describe("background service support", () => {
   it("copies the npx runtime into a stable service runner directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "trmnl-service-"));
-    const source = join(root, "dist-source");
+    const source = join(root, "node_modules", "trmnl-token-meter", "dist");
     await mkdir(source, { recursive: true });
     await writeFile(join(source, "cli.js"), "console.log('runner')\n");
+    await mkdir(join(source, "node_modules", "ignored-package"), { recursive: true });
+    await writeFile(join(source, "node_modules", "ignored-package", "index.js"), "ignored\n");
     const config = loadConfig({
       TRMNL_TOKEN_METER_CONFIG_DIR: join(root, "config"),
       TRMNL_TOKEN_METER_CACHE_DIR: join(root, "cache")
@@ -25,6 +27,9 @@ describe("background service support", () => {
 
     expect(runner).toBe(join(config.serviceDir, "dist", "cli.js"));
     await expect(readFile(runner, "utf8")).resolves.toContain("runner");
+    await expect(
+      readFile(join(config.serviceDir, "dist", "node_modules", "ignored-package", "index.js"), "utf8")
+    ).rejects.toThrow();
     await expect(readFile(join(config.serviceDir, "package.json"), "utf8")).resolves.toContain(
       "\"type\":\"module\""
     );

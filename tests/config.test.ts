@@ -5,6 +5,12 @@ import { describe, expect, it } from "vitest";
 import { deleteCredential, loadConfig, loadCredential, saveCredential } from "../src/config.js";
 
 describe("collector config", () => {
+  it("defaults to the hosted collector backend", () => {
+    const config = loadConfig({});
+
+    expect(config.apiBaseUrl).toBe("https://trmnl-token-meter-backend.trmnltkn.workers.dev");
+  });
+
   it("loads platform paths and custom codex home from env", () => {
     const config = loadConfig({
       CODEX_HOME: "/tmp/codex-custom",

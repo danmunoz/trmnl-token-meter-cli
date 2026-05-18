@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { CollectorConfig } from "./config.js";
@@ -82,7 +82,7 @@ export async function installStableRunner(
   await mkdir(config.serviceDir, { recursive: true, mode: 0o700 });
   await cp(sourceDir, distDir, {
     recursive: true,
-    filter: (source) => !source.includes("node_modules")
+    filter: (source) => basename(source) !== "node_modules"
   });
   await writeFile(join(config.serviceDir, "package.json"), "{\"type\":\"module\"}\n", {
     mode: 0o600

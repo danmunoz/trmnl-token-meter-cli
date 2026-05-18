@@ -1,21 +1,55 @@
 {
   "name": "trmnl-token-meter",
   "version": "0.1.0",
+  "description": "Local Codex usage collector for the TRMNL Token Meter plugin.",
   "private": false,
   "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Daniel Munoz",
+    "email": "me@danmunoz.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danmunoz/trmnl-token-meter-cli.git"
+  },
+  "homepage": "https://github.com/danmunoz/trmnl-token-meter-cli#readme",
+  "bugs": {
+    "url": "https://github.com/danmunoz/trmnl-token-meter-cli/issues"
+  },
+  "keywords": [
+    "trmnl",
+    "codex",
+    "usage",
+    "tokens",
+    "cli"
+  ],
   "packageManager": "pnpm@10.11.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
   "bin": {
     "trmnl-token-meter": "dist/cli.js"
   },
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup src/cli.ts --format esm --dts --clean",
     "dev": "tsx src/cli.ts",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:privacy": "vitest run tests/privacy-canaries.test.ts tests/redact.test.ts"
+    "test:privacy": "vitest run tests/privacy-canaries.test.ts tests/redact.test.ts",
+    "prepack": "pnpm build",
+    "prepublishOnly": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:privacy && pnpm build"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",
