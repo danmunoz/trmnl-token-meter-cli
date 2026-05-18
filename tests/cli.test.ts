@@ -20,6 +20,7 @@ describe("collector CLI", () => {
       CODEX_HOME: fixtureRoot,
       TRMNL_TOKEN_METER_CONFIG_DIR: join(dir, "config"),
       TRMNL_TOKEN_METER_CACHE_DIR: join(dir, "cache"),
+      TRMNL_TOKEN_METER_API_BASE_URL: "https://api.example.test",
       TRMNL_TOKEN_METER_DISABLE_UPDATE_CHECK: "1"
     };
     stdout = "";

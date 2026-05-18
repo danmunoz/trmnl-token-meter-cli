@@ -8,9 +8,10 @@ const secrets = [
   "ABCD-1234",
   "pairing-secret-token",
   "/Users/danielmunoz/Repos/private-project",
+  "/tmp/secret.txt",
   "me@danmunoz.com",
-  "CANARY_PROMPT_DO_NOT_UPLOAD",
-  "CANARY_RESPONSE_DO_NOT_UPLOAD"
+  "hello world",
+  "secret output"
 ];
 
 function expectNoSecrets(message: string): void {
@@ -29,8 +30,9 @@ describe("security redaction", () => {
       pairing_code: "ABCD-1234",
       detail:
         "collector_token=pairing-secret-token for me@danmunoz.com at /Users/danielmunoz/Repos/private-project",
-      prompt: "CANARY_PROMPT_DO_NOT_UPLOAD",
-      response: "CANARY_RESPONSE_DO_NOT_UPLOAD"
+      prompt: "hello world",
+      response: "secret output",
+      command: "cat /tmp/secret.txt"
     });
 
     expectNoSecrets(error.message);
@@ -45,7 +47,9 @@ describe("security redaction", () => {
       body: {
         collector_token: "collector-token-secret",
         pairing_code: "ABCD-1234",
-        raw: "CANARY_PROMPT_DO_NOT_UPLOAD CANARY_RESPONSE_DO_NOT_UPLOAD"
+        prompt: "hello world",
+        response: "secret output",
+        path: "/tmp/secret.txt"
       }
     });
 

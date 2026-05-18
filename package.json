@@ -48,8 +48,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:privacy": "vitest run tests/privacy-canaries.test.ts tests/redact.test.ts",
+    "test:pack": "node ./scripts/smoke-pack.mjs",
     "prepack": "pnpm build",
-    "prepublishOnly": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:privacy && pnpm build"
+    "prepublishOnly": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:privacy && pnpm build && pnpm test:pack"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",

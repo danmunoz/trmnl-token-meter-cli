@@ -24,6 +24,7 @@ import {
 } from "./upload.js";
 import {
   installBackgroundService,
+  isSyncDue,
   readSyncState,
   saveSyncState,
   serviceStatus,
@@ -101,11 +102,18 @@ async function pairCommand(args: string[], config: CollectorConfig): Promise<voi
   if (existing && !hasFlag(args, "--replace")) {
     throw new Error("This machine is already paired. Use add, setup --replace, or pair --replace.");
   }
-  if (existing) {
-    await revokeCollector(existing).catch(() => undefined);
-  }
   const credential = await pairCollector(apiBaseUrl, code, label, COLLECTOR_VERSION);
-  await saveCredential(config.credentialPath, credential);
+  await saveCredential(config.credentialPath, credential).catch(async (error) => {
+    if (existing) await saveCredential(config.credentialPath, existing).catch(() => undefined);
+    throw error;
+  });
+  if (existing) {
+    try {
+      await revokeCollector(existing);
+    } catch {
+      process.stderr.write("Warning: replaced local pairing, but the previous meter could not be revoked.\n");
+    }
+  }
   process.stdout.write(`Paired ${credential.machine_id}\n`);
   process.stdout.write("Next: run `trmnl-token-meter service install` to install background sync.\n");
 }
@@ -141,6 +149,16 @@ async function uploadOnce(config: CollectorConfig): Promise<void> {
 }
 
 async function syncCommand(args: string[], config: CollectorConfig): Promise<void> {
+  const dueMinutes = argValue(args, "--due");
+  if (dueMinutes) {
+    const intervalMinutes = Number.parseInt(dueMinutes, 10);
+    if (!Number.isFinite(intervalMinutes) || intervalMinutes < 1) {
+      throw new Error("sync --due requires a positive integer minute interval");
+    }
+    if (!(await isSyncDue(config, intervalMinutes))) return;
+    await uploadOnce(config);
+    return;
+  }
   if (!hasFlag(args, "--once")) throw new Error("sync currently requires --once");
   await uploadOnce(config);
 }
@@ -312,6 +330,7 @@ async function setupCommand(args: string[], config: CollectorConfig): Promise<vo
   }
 
   const existing = await loadCredential(config.credentialPath);
+  const previousService = existing ? await serviceStatus(config) : null;
   if (existing) {
     const replace =
       hasFlag(args, "--replace") ||
@@ -320,8 +339,6 @@ async function setupCommand(args: string[], config: CollectorConfig): Promise<vo
       await statusCommand(config);
       return;
     }
-    await revokeCollector(existing).catch(() => undefined);
-    await deleteCredential(config.credentialPath);
   }
 
   process.stdout.write(`TRMNL Token Meter
@@ -339,18 +356,39 @@ After setup, uploads will continue automatically in the background.
 
   process.stdout.write("\nPairing...\n");
   const credential = await pairCollector(apiBaseUrl, code, label, COLLECTOR_VERSION);
-  await saveCredential(config.credentialPath, credential);
+  try {
+    await saveCredential(config.credentialPath, credential);
 
-  process.stdout.write("Uploading first snapshot...\n");
-  await uploadOnce(config);
+    process.stdout.write("Uploading first snapshot...\n");
+    await uploadOnce(config);
 
-  process.stdout.write("Installing background sync...\n");
-  const metadata = await installBackgroundService(config, credential.upload_interval_minutes);
+    process.stdout.write("Installing background sync...\n");
+    const metadata = await installBackgroundService(config, credential.upload_interval_minutes);
 
-  process.stdout.write(`\nDone.
+    if (existing) {
+      try {
+        await revokeCollector(existing);
+      } catch {
+        process.stderr.write("Warning: setup switched to the new meter, but the previous meter could not be revoked.\n");
+      }
+    }
+
+    process.stdout.write(`\nDone.
 This machine will sync automatically every ${metadata.interval_minutes} minutes using ${metadata.method}.
 You can close this terminal.
 `);
+  } catch (error) {
+    if (existing) {
+      await saveCredential(config.credentialPath, existing).catch(() => undefined);
+      if (previousService?.installed) {
+        await installBackgroundService(config, existing.upload_interval_minutes).catch(() => undefined);
+      }
+    } else {
+      await deleteCredential(config.credentialPath).catch(() => undefined);
+      await uninstallBackgroundService(config, { removeRunner: true }).catch(() => undefined);
+    }
+    throw error;
+  }
 }
 
 async function menuCommand(config: CollectorConfig): Promise<void> {

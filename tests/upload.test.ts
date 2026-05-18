@@ -91,6 +91,24 @@ describe("upload client", () => {
     });
   });
 
+  it("rejects pairing responses that change the API origin", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          collector_token: "secret-token",
+          api_base_url: "https://evil.test",
+          machine_id: "mach",
+          upload_interval_minutes: 15
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    await expect(
+      pairCollector("https://api.example.test", "ABCD-1234", "Machine", "0.1.0", fetchMock)
+    ).rejects.toThrow("unexpected API origin");
+  });
+
   it("reads collector status with bearer auth", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
@@ -242,5 +260,35 @@ describe("upload client", () => {
         !message.includes("CANARY_PROMPT_DO_NOT_UPLOAD")
       );
     });
+  });
+
+  it("times out stalled uploads", async () => {
+    process.env.TRMNL_TOKEN_METER_REQUEST_TIMEOUT_MS = "25";
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+      async (_input, init) =>
+        await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          });
+        })
+    );
+
+    try {
+      await expect(
+        uploadAggregate(
+          {
+            collector_token: "secret-token",
+            api_base_url: "https://api.example.test",
+            machine_id: "mach",
+            machine_label: "Machine",
+            upload_interval_minutes: 15
+          },
+          snapshot,
+          fetchMock
+        )
+      ).rejects.toThrow("upload request timed out");
+    } finally {
+      delete process.env.TRMNL_TOKEN_METER_REQUEST_TIMEOUT_MS;
+    }
   });
 });

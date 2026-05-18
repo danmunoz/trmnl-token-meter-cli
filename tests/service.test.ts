@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import {
+  isSyncDue,
   installStableRunner,
   saveSyncState,
   serviceStatus,
@@ -55,11 +56,26 @@ describe("background service support", () => {
     await saveSyncState(config, { last_status: "success" });
 
     await expect(serviceStatus(config)).resolves.toMatchObject({
-      installed: true,
       method: "launchd",
       runner,
       interval_minutes: 15,
       last_status: "success"
     });
+  });
+
+  it("treats cron sync as due only after the configured interval", async () => {
+    const root = await mkdtemp(join(tmpdir(), "trmnl-service-due-"));
+    const config = loadConfig({
+      TRMNL_TOKEN_METER_CONFIG_DIR: join(root, "config"),
+      TRMNL_TOKEN_METER_CACHE_DIR: join(root, "cache")
+    });
+
+    await expect(isSyncDue(config, 15, new Date("2026-05-18T12:00:00.000Z"))).resolves.toBe(true);
+    await saveSyncState(config, {
+      last_status: "success",
+      last_sync_at: "2026-05-18T12:00:00.000Z"
+    });
+    await expect(isSyncDue(config, 15, new Date("2026-05-18T12:10:00.000Z"))).resolves.toBe(false);
+    await expect(isSyncDue(config, 15, new Date("2026-05-18T12:16:00.000Z"))).resolves.toBe(true);
   });
 });

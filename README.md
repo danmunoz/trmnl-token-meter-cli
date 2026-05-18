@@ -1,10 +1,29 @@
 # TRMNL Token Meter CLI
 
+<p align="center">
+  <img src="./docs/assets/trmnl-token-meter-preview.png" alt="TRMNL Token Meter display preview" width="800" />
+</p>
+
 TRMNL Token Meter is a local collector for showing Codex token usage on a TRMNL display.
 
 The CLI runs on your computer, reads local Codex usage records, calculates aggregate token and estimated cost totals, and syncs those totals to your TRMNL Token Meter plugin. It is meant for people who want a private, glanceable meter for how much Codex usage is happening today, this week, and this month.
 
 Privacy is the core design constraint: raw Codex usage content stays on your machine. The CLI does not upload prompts, responses, commands, diffs, file contents, repository names, or file paths. It sends only aggregate totals and status fields needed to render the TRMNL display.
+
+## Compatibility
+
+- Supported OS: macOS and Linux
+- Supported Node: `>=22.13.0`
+
+The package manifest enforces the OS restriction at install time.
+
+## How It Works
+
+1. The CLI scans local Codex usage files on your machine.
+2. It converts those records into daily, rolling-window, and per-model aggregates.
+3. It uploads only the sanitized aggregate snapshot needed by the TRMNL Token Meter backend.
+
+The collector is designed to be useful without becoming another remote analytics pipe. Raw Codex session content stays local.
 
 ## Quick Start
 
@@ -23,6 +42,21 @@ https://trmnl-token-meter-backend.trmnltkn.workers.dev
 ```
 
 Setup pairs this machine, uploads the first sanitized aggregate snapshot, and installs background sync. After setup, uploads continue automatically on the configured interval.
+
+## Install Options
+
+Run directly from npm without a global install:
+
+```bash
+npx trmnl-token-meter
+```
+
+If you want a persistent local command instead, install from npm:
+
+```bash
+npm install -g trmnl-token-meter
+trmnl-token-meter --version
+```
 
 ## What Gets Sent
 
@@ -182,6 +216,15 @@ npx trmnl-token-meter uninstall
 
 By default, `uninstall` keeps local pairing credentials. Use `uninstall --revoke` if you also want to revoke this machine from the TRMNL meter.
 
+## Background Sync
+
+After pairing, the CLI installs a local background job so the display keeps updating without leaving a terminal open.
+
+- macOS: `launchd`
+- Linux: `systemd` when available, otherwise `cron`
+
+Use `npx trmnl-token-meter status` to inspect whether background sync is installed and when the last local/server sync completed.
+
 ## Non-Interactive Setup
 
 For scripts or troubleshooting, pair manually:
@@ -205,6 +248,26 @@ Upload once:
 npx trmnl-token-meter upload
 ```
 
+## Test Locally
+
+To test the CLI from this repository with a persistent local command, install it globally from the repo root:
+
+```bash
+pnpm install
+pnpm build
+npm install -g .
+```
+
+Then you can run the CLI directly from later terminal sessions:
+
+```bash
+trmnl-token-meter --version
+trmnl-token-meter setup --api-base-url https://trmnl-token-meter-backend.trmnltkn.workers.dev
+trmnl-token-meter status
+```
+
+This is useful for local development and manual testing. The public setup flow still uses `npx trmnl-token-meter`.
+
 ## Inspect Before Uploading
 
 Use `collect` to print the exact sanitized payload locally without uploading:
@@ -214,6 +277,51 @@ npx trmnl-token-meter collect
 ```
 
 This is the best way to verify what would be sent. The output is the aggregate snapshot, not raw Codex content.
+
+## Local Configuration
+
+The collector stores credentials, service metadata, and sync state locally on your machine.
+
+- `CODEX_HOME` controls where Codex usage files are read from. Default: `~/.codex`
+- `TRMNL_TOKEN_METER_API_BASE_URL` overrides the backend URL
+- `TRMNL_TOKEN_METER_CONFIG_DIR` overrides the config directory
+- `TRMNL_TOKEN_METER_CACHE_DIR` overrides the cache directory
+- `TRMNL_TOKEN_METER_INCLUDE_PI_SESSIONS=1` includes compatible Pi session aggregates when present
+- `PI_HOME` overrides the Pi home directory. Default: `~/.pi`
+
+Default local paths:
+
+- macOS config: `~/Library/Application Support/trmnl-token-meter`
+- macOS cache/logs: `~/Library/Caches/trmnl-token-meter`
+- Linux config: `${XDG_CONFIG_HOME:-~/.config}/trmnl-token-meter`
+- Linux cache/logs: `${XDG_CACHE_HOME:-~/.cache}/trmnl-token-meter`
+
+Background service logs are written to the cache directory as `service.log` and `service.err.log`.
+
+## Project Policies
+
+- Security reporting: [SECURITY.md](./SECURITY.md)
+- Contributing guide: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- License: [LICENSE](./LICENSE)
+- Release process: [docs/releasing.md](./docs/releasing.md)
+- User-facing change log: [CHANGELOG.md](./CHANGELOG.md)
+
+## Contributing
+
+Contributions are welcome, especially around privacy hardening, cross-platform service behavior, documentation, and test coverage.
+
+Before opening a pull request:
+
+1. Install dependencies with `pnpm install`.
+2. Run `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm test:privacy`, and `pnpm test:pack`.
+3. Update docs and tests in the same change when behavior or payload shape changes.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contributor workflow and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) for collaboration expectations.
+
+## License
+
+This project is released under the [MIT License](./LICENSE).
 
 ## Local Sources
 

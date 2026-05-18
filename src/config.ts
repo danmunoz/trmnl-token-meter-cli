@@ -21,6 +21,30 @@ export interface CollectorConfig {
   piSessionsHome: string;
 }
 
+const isLoopbackHost = (hostname: string): boolean =>
+  hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+
+export function normalizeApiBaseUrl(
+  value: string,
+  options: { expectedOrigin?: string } = {}
+): string {
+  const url = new URL(value);
+  if (url.username || url.password) {
+    throw new Error("API base URL must not include embedded credentials.");
+  }
+  if (url.protocol !== "https:" && !isLoopbackHost(url.hostname)) {
+    throw new Error("API base URL must use HTTPS unless it targets localhost.");
+  }
+  if (options.expectedOrigin && url.origin !== options.expectedOrigin) {
+    throw new Error("Pairing response returned an unexpected API origin.");
+  }
+  const normalizedPath = url.pathname.replace(/\/+$/, "");
+  url.pathname = normalizedPath || "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/+$/, "");
+}
+
 function defaultConfigDir(): string {
   if (process.env.TRMNL_TOKEN_METER_CONFIG_DIR) return process.env.TRMNL_TOKEN_METER_CONFIG_DIR;
   if (platform() === "darwin") {
@@ -42,7 +66,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
   const cacheDir = env.TRMNL_TOKEN_METER_CACHE_DIR ?? defaultCacheDir();
   const apiBaseUrl = env.TRMNL_TOKEN_METER_API_BASE_URL ?? DEFAULT_API_BASE_URL;
   return {
-    apiBaseUrl: apiBaseUrl.replace(/\/+$/, ""),
+    apiBaseUrl: normalizeApiBaseUrl(apiBaseUrl),
     codexHome: resolve(codexHome),
     codexHomeKind: env.CODEX_HOME && env.CODEX_HOME.trim() ? "custom" : "default",
     configDir: resolve(configDir),

@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+import { normalizeApiBaseUrl } from "./config.js";
 import { safeErrorMessage } from "./redact.js";
 import type { AggregateSnapshot, CollectorCredential } from "./types.js";
 
@@ -41,6 +43,28 @@ export class CollectorApiError extends Error {
   }
 }
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const RETRY_LIMIT_BY_OPERATION: Record<CollectorApiError["operation"], number> = {
+  pair: 0,
+  upload: 2,
+  status: 2,
+  revoke: 2
+};
+
+const isRetryableStatus = (status: number): boolean =>
+  status === 408 || status === 425 || status === 429 || status >= 500;
+
+const isRetryableError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || error.name === "TimeoutError" || error.name === "TypeError";
+};
+
+const requestTimeoutMs = (): number => {
+  const raw = process.env.TRMNL_TOKEN_METER_REQUEST_TIMEOUT_MS;
+  const value = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_REQUEST_TIMEOUT_MS;
+};
+
 function errorCodeFromBody(body: unknown): CollectorErrorCode {
   if (!body || typeof body !== "object") return "unknown";
   const error = (body as Record<string, unknown>).error;
@@ -72,6 +96,45 @@ async function responseBody(response: Response): Promise<unknown> {
   }
 }
 
+async function fetchWithPolicy(
+  operation: CollectorApiError["operation"],
+  url: URL,
+  init: RequestInit,
+  fetchImpl: typeof fetch
+): Promise<Response> {
+  const retryLimit = RETRY_LIMIT_BY_OPERATION[operation];
+
+  for (let attempt = 0; ; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutMs = requestTimeoutMs();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetchImpl(url, { ...init, signal: controller.signal });
+      if (!response.ok && isRetryableStatus(response.status) && attempt < retryLimit) {
+        await delay(250 * (attempt + 1));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        if (attempt < retryLimit) {
+          await delay(250 * (attempt + 1));
+          continue;
+        }
+        throw new Error(`${operation} request timed out after ${timeoutMs}ms`);
+      }
+      if (attempt < retryLimit && isRetryableError(error)) {
+        await delay(250 * (attempt + 1));
+        continue;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
 function throwCollectorError(
   operation: "pair" | "upload" | "status" | "revoke",
   response: Response,
@@ -97,15 +160,20 @@ export async function uploadAggregate(
   snapshot: AggregateSnapshot,
   fetchImpl: typeof fetch = fetch
 ): Promise<unknown> {
-  const url = new URL("/api/v1/usage", credential.api_base_url);
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${credential.collector_token}`,
-      "content-type": "application/json"
+  const url = new URL("/api/v1/usage", normalizeApiBaseUrl(credential.api_base_url));
+  const response = await fetchWithPolicy(
+    "upload",
+    url,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${credential.collector_token}`,
+        "content-type": "application/json"
+      },
+      body: serializeAggregateForUpload(snapshot)
     },
-    body: serializeAggregateForUpload(snapshot)
-  });
+    fetchImpl
+  );
 
   const body = await responseBody(response);
 
@@ -122,16 +190,23 @@ export async function pairCollector(
   collectorVersion: string,
   fetchImpl: typeof fetch = fetch
 ): Promise<CollectorCredential> {
-  const url = new URL("/api/v1/pair", apiBaseUrl);
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      pairing_code: pairingCode,
-      machine_label: machineLabel,
-      collector_version: collectorVersion
-    })
-  });
+  const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  const expectedOrigin = new URL(normalizedApiBaseUrl).origin;
+  const url = new URL("/api/v1/pair", normalizedApiBaseUrl);
+  const response = await fetchWithPolicy(
+    "pair",
+    url,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        pairing_code: pairingCode,
+        machine_label: machineLabel,
+        collector_version: collectorVersion
+      })
+    },
+    fetchImpl
+  );
   const body = (await responseBody(response)) as Partial<CollectorCredential>;
   if (!response.ok) {
     throwCollectorError("pair", response, body);
@@ -141,7 +216,7 @@ export async function pairCollector(
   }
   return {
     collector_token: body.collector_token,
-    api_base_url: body.api_base_url,
+    api_base_url: normalizeApiBaseUrl(body.api_base_url, { expectedOrigin }),
     machine_id: body.machine_id,
     machine_label: machineLabel,
     upload_interval_minutes: body.upload_interval_minutes ?? 15
@@ -152,10 +227,15 @@ export async function getCollectorStatus(
   credential: CollectorCredential,
   fetchImpl: typeof fetch = fetch
 ): Promise<CollectorStatus> {
-  const response = await fetchImpl(new URL("/api/v1/status", credential.api_base_url), {
-    method: "GET",
-    headers: { authorization: `Bearer ${credential.collector_token}` }
-  });
+  const response = await fetchWithPolicy(
+    "status",
+    new URL("/api/v1/status", normalizeApiBaseUrl(credential.api_base_url)),
+    {
+      method: "GET",
+      headers: { authorization: `Bearer ${credential.collector_token}` }
+    },
+    fetchImpl
+  );
   const body = (await responseBody(response)) as Partial<CollectorStatus>;
   if (!response.ok) {
     throwCollectorError("status", response, body);
@@ -172,10 +252,15 @@ export async function revokeCollector(
   credential: CollectorCredential,
   fetchImpl: typeof fetch = fetch
 ): Promise<{ ok: boolean; revoked_at: string | null }> {
-  const response = await fetchImpl(new URL("/api/v1/collector", credential.api_base_url), {
-    method: "DELETE",
-    headers: { authorization: `Bearer ${credential.collector_token}` }
-  });
+  const response = await fetchWithPolicy(
+    "revoke",
+    new URL("/api/v1/collector", normalizeApiBaseUrl(credential.api_base_url)),
+    {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${credential.collector_token}` }
+    },
+    fetchImpl
+  );
   const body = (await responseBody(response)) as { ok?: boolean; revoked_at?: unknown };
   if (!response.ok) {
     throwCollectorError("revoke", response, body);

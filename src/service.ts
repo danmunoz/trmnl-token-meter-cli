@@ -36,9 +36,15 @@ export interface ServiceStatus {
 }
 
 type CommandRunner = (file: string, args: string[]) => Promise<void>;
+type TextRunner = (file: string, args: string[]) => Promise<string>;
 
 const defaultCommandRunner: CommandRunner = async (file, args) => {
   await execFileAsync(file, args);
+};
+
+const defaultTextRunner: TextRunner = async (file, args) => {
+  const result = await execFileAsync(file, args);
+  return String(result.stdout);
 };
 
 const xmlEscape = (value: string): string =>
@@ -64,6 +70,12 @@ function currentRuntimeDir(): string {
   return dirname(fileURLToPath(import.meta.url));
 }
 
+function stableRunnerSourceDir(): string {
+  const runtimeDir = currentRuntimeDir();
+  if (basename(fileURLToPath(import.meta.url)) === "cli.js") return runtimeDir;
+  return join(dirname(runtimeDir), "dist");
+}
+
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path, constants.F_OK);
@@ -75,9 +87,12 @@ async function pathExists(path: string): Promise<boolean> {
 
 export async function installStableRunner(
   config: CollectorConfig,
-  sourceDir = currentRuntimeDir()
+  sourceDir = stableRunnerSourceDir()
 ): Promise<string> {
   const distDir = join(config.serviceDir, "dist");
+  if (!(await pathExists(join(sourceDir, "cli.js")))) {
+    throw new Error("Could not find a built CLI runtime. Run `pnpm build` before installing background sync.");
+  }
   await rm(distDir, { recursive: true, force: true });
   await mkdir(config.serviceDir, { recursive: true, mode: 0o700 });
   await cp(sourceDir, distDir, {
@@ -203,9 +218,10 @@ async function installCron(
     shellQuote(process.execPath),
     shellQuote(runner),
     "sync",
-    "--once"
+    "--due",
+    String(Math.max(1, intervalMinutes))
   ].join(" ");
-  const schedule = `*/${Math.max(1, intervalMinutes)} * * * * ${command}`;
+  const schedule = `* * * * * ${command}`;
   const stripped = existing.replace(
     new RegExp(`\\n?${CRON_BEGIN}[\\s\\S]*?${CRON_END}\\n?`, "m"),
     "\n"
@@ -304,6 +320,7 @@ export async function saveSyncState(
   config: CollectorConfig,
   state: Omit<SyncState, "last_sync_at"> & { last_sync_at?: string | null }
 ): Promise<void> {
+  await mkdir(dirname(config.serviceStatePath), { recursive: true, mode: 0o700 });
   await writeFile(
     config.serviceStatePath,
     `${JSON.stringify({ last_sync_at: new Date().toISOString(), ...state }, null, 2)}\n`,
@@ -320,10 +337,67 @@ export async function readSyncState(config: CollectorConfig): Promise<SyncState 
   }
 }
 
+export async function isSyncDue(
+  config: CollectorConfig,
+  intervalMinutes: number,
+  now = new Date()
+): Promise<boolean> {
+  const state = await readSyncState(config);
+  const lastSync = state?.last_sync_at ? new Date(state.last_sync_at) : null;
+  if (!lastSync || Number.isNaN(lastSync.getTime())) return true;
+  return now.getTime() - lastSync.getTime() >= Math.max(1, intervalMinutes) * 60_000;
+}
+
+async function schedulerInstalled(
+  config: CollectorConfig,
+  metadata: ServiceMetadata,
+  options: { runCommand?: CommandRunner; readCommandText?: TextRunner } = {}
+): Promise<boolean> {
+  const runCommand = options.runCommand ?? defaultCommandRunner;
+  const readCommandText = options.readCommandText ?? defaultTextRunner;
+
+  if (metadata.method === "launchd") {
+    const plistPath = join(homedir(), "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`);
+    if (!(await pathExists(plistPath))) return false;
+    try {
+      await runCommand("launchctl", ["print", `gui/${process.getuid?.() ?? ""}/${SERVICE_LABEL}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  if (metadata.method === "systemd") {
+    const userDir = join(homedir(), ".config", "systemd", "user");
+    if (
+      !(await pathExists(join(userDir, "trmnl-token-meter.timer"))) ||
+      !(await pathExists(join(userDir, "trmnl-token-meter.service")))
+    ) {
+      return false;
+    }
+    try {
+      await runCommand("systemctl", ["--user", "is-enabled", "trmnl-token-meter.timer"]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  try {
+    const current = await readCommandText("crontab", ["-l"]);
+    return current.includes(CRON_BEGIN) && current.includes(CRON_END);
+  } catch {
+    return false;
+  }
+}
+
 export async function serviceStatus(config: CollectorConfig): Promise<ServiceStatus> {
   const [metadata, state] = await Promise.all([readServiceMetadata(config), readSyncState(config)]);
+  const installed =
+    Boolean(metadata && (await pathExists(metadata.runner))) &&
+    Boolean(metadata && (await schedulerInstalled(config, metadata)));
   return {
-    installed: Boolean(metadata && (await pathExists(metadata.runner))),
+    installed,
     method: metadata?.method ?? null,
     runner: metadata?.runner ?? null,
     interval_minutes: metadata?.interval_minutes ?? null,
