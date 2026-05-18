@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildAggregate } from "../src/aggregate.js";
 import { loadConfig } from "../src/config.js";
-import { readCodexUsage } from "../src/codex-log-reader.js";
+import { scanLocalCostSources } from "../src/cost-scan.js";
 import { serializeAggregateForUpload } from "../src/upload.js";
 
 const fixtureRoot = new URL("./fixtures/codex-jsonl/default", import.meta.url).pathname;
@@ -15,13 +15,15 @@ const canaries = [
 ];
 
 describe("privacy canaries", () => {
-  it("keeps raw Codex content out of upload serialization", async () => {
-    const result = await readCodexUsage(loadConfig({ CODEX_HOME: fixtureRoot }));
-    const snapshot = buildAggregate(result.events, {
+  it("keeps raw Codex content out of production upload serialization", async () => {
+    const config = loadConfig({ CODEX_HOME: fixtureRoot });
+    const result = await scanLocalCostSources(config);
+    const snapshot = buildAggregate(result.records, {
       machineId: "mach_1",
       machineLabel: "Daniel MacBook",
       codexHomeKind: "default",
       now: new Date("2026-05-15T12:00:00.000Z"),
+      sources: result.sources,
       warnings: result.warnings
     });
 

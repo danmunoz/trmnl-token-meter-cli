@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildAggregate } from "../src/aggregate.js";
+import { safeErrorMessage } from "../src/redact.js";
 import {
   getCollectorStatus,
   isCollectorApiError,
@@ -201,5 +202,45 @@ describe("upload client", () => {
     } catch (error) {
       expect(isCollectorApiError(error, "collector_revoked")).toBe(true);
     }
+  });
+
+  it("redacts upload failure details in CLI-safe error messages", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "collector_unauthorized",
+          authorization: "Bearer secret-token",
+          collector_token: "secret-token",
+          pairing_code: "ABCD-1234",
+          detail:
+            "failed for me@danmunoz.com at /Users/danielmunoz/Repos/private-project with CANARY_PROMPT_DO_NOT_UPLOAD"
+        }),
+        { status: 401, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    await expect(
+      uploadAggregate(
+        {
+          collector_token: "secret-token",
+          api_base_url: "https://api.example.test",
+          machine_id: "mach",
+          machine_label: "Machine",
+          upload_interval_minutes: 15
+        },
+        snapshot,
+        fetchMock
+      )
+    ).rejects.toSatisfy((error: unknown) => {
+      const message = safeErrorMessage(error);
+      return (
+        !message.includes("Bearer secret-token") &&
+        !message.includes("secret-token") &&
+        !message.includes("ABCD-1234") &&
+        !message.includes("me@danmunoz.com") &&
+        !message.includes("/Users/danielmunoz/Repos/private-project") &&
+        !message.includes("CANARY_PROMPT_DO_NOT_UPLOAD")
+      );
+    });
   });
 });
