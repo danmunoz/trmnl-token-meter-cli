@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
 import { hostname } from "node:os";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { buildAggregate } from "./aggregate.js";
 import {
@@ -22,6 +21,7 @@ import {
   serializeAggregateForUpload,
   uploadAggregate
 } from "./upload.js";
+import { printStatusSummary } from "./status-ui.js";
 import {
   installBackgroundService,
   isSyncDue,
@@ -30,6 +30,7 @@ import {
   serviceStatus,
   uninstallBackgroundService
 } from "./service.js";
+import { ask, confirm, isPromptCancelledError, selectMenu } from "./tui.js";
 import { COLLECTOR_VERSION, DEFAULT_UPLOAD_INTERVAL_MINUTES, type AggregateSnapshot } from "./types.js";
 import { updateNotice } from "./update-check.js";
 
@@ -177,28 +178,6 @@ async function runCommand(args: string[], config: CollectorConfig): Promise<void
   }, minutes * 60_000);
 }
 
-function openPrompt() {
-  return createInterface({ input: process.stdin, output: process.stdout });
-}
-
-async function ask(question: string, fallback = ""): Promise<string> {
-  const prompt = fallback ? `${question} (${fallback}): ` : `${question}: `;
-  const rl = openPrompt();
-  try {
-    const answer = (await rl.question(prompt)).trim();
-    return answer || fallback;
-  } finally {
-    rl.close();
-  }
-}
-
-async function confirm(question: string, fallback = false): Promise<boolean> {
-  const suffix = fallback ? "Y/n" : "y/N";
-  const answer = (await ask(`${question} [${suffix}]`)).toLowerCase();
-  if (!answer) return fallback;
-  return answer === "y" || answer === "yes";
-}
-
 function formatDate(value: string | null | undefined): string {
   if (!value) return "Never";
   const date = new Date(value);
@@ -213,38 +192,38 @@ async function statusCommand(config: CollectorConfig): Promise<void> {
     readSyncState(config)
   ]);
 
-  process.stdout.write("TRMNL Token Meter Status\n\n");
-  if (!credential) {
-    process.stdout.write("Meter: not paired\n");
-  } else {
-    process.stdout.write(`Meter: paired as ${credential.machine_label} (${credential.machine_id})\n`);
+  let remoteStatus = null;
+  let remoteError: string | null = null;
+  let revoked = false;
+
+  if (credential) {
     try {
-      const remote = await getCollectorStatus(credential);
-      process.stdout.write(`Server: ${remote.plugin_status} plugin, ${remote.machine_status} device\n`);
-      process.stdout.write(`Last server sync: ${formatDate(remote.last_received_at)}\n`);
+      remoteStatus = await getCollectorStatus(credential);
     } catch (error) {
       if (isCollectorApiError(error, "collector_revoked")) {
-        process.stdout.write("Server: revoked\n");
-        process.stdout.write(
-          "This machine is no longer authorized to upload. Run `trmnl-token-meter add` to pair again, or `trmnl-token-meter uninstall` to remove local credentials.\n"
-        );
+        revoked = true;
       } else {
-        process.stdout.write(`Server: ${safeErrorMessage(error)}\n`);
+        remoteError = safeErrorMessage(error);
       }
     }
   }
 
-  process.stdout.write(
-    `Background sync: ${
-      localService.installed
-        ? `${localService.method} every ${localService.interval_minutes ?? "?"} minutes`
-        : "not installed"
-    }\n`
+  printStatusSummary(
+    {
+      credential,
+      remoteStatus,
+      remoteError,
+      revoked,
+      localService,
+      syncState: syncState
+        ? {
+            ...syncState,
+            ...(syncState.last_error ? { last_error: safeErrorMessage(syncState.last_error) } : {})
+          }
+        : null
+    },
+    formatDate
   );
-  process.stdout.write(`Last local sync: ${formatDate(syncState?.last_sync_at)}\n`);
-  if (syncState?.last_status === "error") {
-    process.stdout.write(`Last sync error: ${safeErrorMessage(syncState.last_error)}\n`);
-  }
 }
 
 async function installServiceCommand(config: CollectorConfig): Promise<void> {
@@ -402,20 +381,21 @@ async function menuCommand(config: CollectorConfig): Promise<void> {
   process.stdout.write(`TRMNL Token Meter
 
 Paired meter: ${credential.machine_label}
-
 `);
-  process.stdout.write("1. View status\n");
-  process.stdout.write("2. Sync now\n");
-  process.stdout.write("3. Add or replace meter\n");
-  process.stdout.write("4. Revoke meter\n");
-  process.stdout.write("5. Uninstall background sync\n");
-  process.stdout.write("6. Quit\n\n");
-  const choice = await ask("Choose an option", "1");
-  if (choice === "1") return statusCommand(config);
-  if (choice === "2") return uploadCommand(config);
-  if (choice === "3") return setupCommand(["--replace"], config);
-  if (choice === "4") return revokeCommand([], config);
-  if (choice === "5") return uninstallCommand([], config);
+  const choice = await selectMenu("Choose an action", [
+    { label: "View status", value: "status" },
+    { label: "Sync now", value: "sync" },
+    { label: "Add or replace meter", value: "setup" },
+    { label: "Revoke meter", value: "revoke" },
+    { label: "Uninstall background sync", value: "uninstall" },
+    { label: "Quit", value: "quit" }
+  ]);
+  if (!choice || choice === "quit") return;
+  if (choice === "status") return statusCommand(config);
+  if (choice === "sync") return uploadCommand(config);
+  if (choice === "setup") return setupCommand(["--replace"], config);
+  if (choice === "revoke") return revokeCommand([], config);
+  if (choice === "uninstall") return uninstallCommand([], config);
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
@@ -462,6 +442,10 @@ function isDirectCliExecution(): boolean {
 
 if (isDirectCliExecution()) {
   main().catch((error: unknown) => {
+    if (isPromptCancelledError(error)) {
+      process.stdout.write("Cancelled\n");
+      return;
+    }
     process.stderr.write(`${safeErrorMessage(error)}\n`);
     process.exitCode = 1;
   });

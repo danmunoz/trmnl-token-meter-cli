@@ -184,6 +184,8 @@ Open setup or the local control menu:
 npx trmnl-token-meter
 ```
 
+When a terminal is attached, the control menu uses arrow-key selection and Enter to confirm.
+
 Show current pairing, background sync, and server status:
 
 ```bash

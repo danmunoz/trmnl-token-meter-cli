@@ -104,6 +104,7 @@ describe("collector CLI", () => {
 
     await main(["status"]);
 
+    expect(stdout).toContain("Server");
     expect(stdout).toContain("Server: revoked");
     expect(stdout).toContain("trmnl-token-meter add");
   });
