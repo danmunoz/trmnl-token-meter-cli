@@ -37,7 +37,7 @@ describe("collector config", () => {
       api_base_url: "https://api.example.test",
       machine_id: "mach_1",
       machine_label: "Laptop",
-      upload_interval_minutes: 15
+      upload_interval_minutes: 60
     });
 
     await expect(loadCredential(path)).resolves.toMatchObject({ machine_id: "mach_1" });

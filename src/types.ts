@@ -1,6 +1,7 @@
 export const AGGREGATE_SCHEMA_VERSION = "2026-05-15.v2-codexbar-cost";
 export const COLLECTOR_VERSION = "0.1.0";
 export const COST_ENGINE_VERSION = "2026-05-15.codexbar-parity";
+export const DEFAULT_UPLOAD_INTERVAL_MINUTES = 60;
 
 export type CostStatus = "known" | "partial" | "unknown" | "disabled";
 export type WarningSeverity = "info" | "warning" | "error";

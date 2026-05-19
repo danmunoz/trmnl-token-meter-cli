@@ -52,7 +52,7 @@ describe("upload client", () => {
         api_base_url: "https://api.example.test",
         machine_id: "mach",
         machine_label: "Machine",
-        upload_interval_minutes: 15
+        upload_interval_minutes: 60
       },
       snapshot,
       fetchMock
@@ -74,7 +74,7 @@ describe("upload client", () => {
           collector_token: "secret-token",
           api_base_url: "https://api.example.test",
           machine_id: "mach",
-          upload_interval_minutes: 15
+          upload_interval_minutes: 60
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       )
@@ -87,7 +87,30 @@ describe("upload client", () => {
       api_base_url: "https://api.example.test",
       machine_id: "mach",
       machine_label: "Machine",
-      upload_interval_minutes: 15
+      upload_interval_minutes: 60
+    });
+  });
+
+  it("defaults the pairing interval to 60 minutes when the backend omits it", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          collector_token: "secret-token",
+          api_base_url: "https://api.example.test",
+          machine_id: "mach"
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    await expect(
+      pairCollector("https://api.example.test", "ABCD-1234", "Machine", "0.1.0", fetchMock)
+    ).resolves.toEqual({
+      collector_token: "secret-token",
+      api_base_url: "https://api.example.test",
+      machine_id: "mach",
+      machine_label: "Machine",
+      upload_interval_minutes: 60
     });
   });
 
@@ -98,7 +121,7 @@ describe("upload client", () => {
           collector_token: "secret-token",
           api_base_url: "https://evil.test",
           machine_id: "mach",
-          upload_interval_minutes: 15
+          upload_interval_minutes: 60
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       )
@@ -129,7 +152,7 @@ describe("upload client", () => {
           api_base_url: "https://api.example.test",
           machine_id: "mach",
           machine_label: "Machine",
-          upload_interval_minutes: 15
+          upload_interval_minutes: 60
         },
         fetchMock
       )
@@ -158,7 +181,7 @@ describe("upload client", () => {
           api_base_url: "https://api.example.test",
           machine_id: "mach",
           machine_label: "Machine",
-          upload_interval_minutes: 15
+          upload_interval_minutes: 60
         },
         fetchMock
       )
@@ -195,7 +218,7 @@ describe("upload client", () => {
           api_base_url: "https://api.example.test",
           machine_id: "mach",
           machine_label: "Machine",
-          upload_interval_minutes: 15
+          upload_interval_minutes: 60
         },
         fetchMock
       )
@@ -213,7 +236,7 @@ describe("upload client", () => {
           api_base_url: "https://api.example.test",
           machine_id: "mach",
           machine_label: "Machine",
-          upload_interval_minutes: 15
+          upload_interval_minutes: 60
         },
         fetchMock
       );
@@ -244,7 +267,7 @@ describe("upload client", () => {
           api_base_url: "https://api.example.test",
           machine_id: "mach",
           machine_label: "Machine",
-          upload_interval_minutes: 15
+          upload_interval_minutes: 60
         },
         snapshot,
         fetchMock
@@ -281,7 +304,7 @@ describe("upload client", () => {
             api_base_url: "https://api.example.test",
             machine_id: "mach",
             machine_label: "Machine",
-            upload_interval_minutes: 15
+            upload_interval_minutes: 60
           },
           snapshot,
           fetchMock
