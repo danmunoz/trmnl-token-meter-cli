@@ -24,6 +24,7 @@ import {
 import { printStatusSummary } from "./status-ui.js";
 import {
   installBackgroundService,
+  refreshInstalledRunner,
   isSyncDue,
   readSyncState,
   saveSyncState,
@@ -409,13 +410,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       loadedConfig.includePiSessions
   };
   await ensureCollectorDirs(config);
-  if (shouldCheckForUpdates(command, argv)) await maybePrintUpdateNotice(config, argv);
 
   if (command === "--help" || command === "-h" || command === "help") return printHelp();
   if (command === "--version" || command === "-v" || command === "version") {
     process.stdout.write(`${COLLECTOR_VERSION}\n`);
     return;
   }
+
+  await refreshInstalledRunner(config).catch((error) => {
+    process.stderr.write(`Warning: could not refresh the background runner: ${safeErrorMessage(error)}\n`);
+  });
+  if (shouldCheckForUpdates(command, argv)) await maybePrintUpdateNotice(config, argv);
+
   if (argv.length === 0 || command === "menu") return menuCommand(config);
   if (command === "setup" || command === "add") return setupCommand(args, config);
   if (command === "status") return statusCommand(config);

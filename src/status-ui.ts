@@ -17,6 +17,15 @@ function serviceLine(status: ServiceStatus): string {
   return `Background sync: ${status.method} every ${status.interval_minutes ?? "?"} minutes`;
 }
 
+function runnerVersionLine(status: ServiceStatus): string | null {
+  if (!status.installed) return null;
+  if (!status.runner_version) return `Background runner version: unknown (current CLI ${status.current_version})`;
+  if (status.runner_version === status.current_version) {
+    return `Background runner version: ${status.runner_version} (matches current CLI)`;
+  }
+  return `Background runner version: ${status.runner_version} (current CLI ${status.current_version})`;
+}
+
 function addSection(lines: string[], title: string, rows: string[]): void {
   if (lines.length > 0) lines.push("");
   lines.push(title);
@@ -59,8 +68,17 @@ export function renderStatusSummary(
   }
 
   const syncRows = [serviceLine(data.localService), `Last local sync: ${formatDate(data.syncState?.last_sync_at)}`];
+  const runnerVersion = runnerVersionLine(data.localService);
+  if (runnerVersion) syncRows.splice(1, 0, runnerVersion);
   if (data.syncState?.last_status === "error") {
     syncRows.push(`Last sync error: ${data.syncState.last_error ?? "Unknown error"}`);
+  }
+  if (
+    data.localService.installed &&
+    data.localService.runner_version &&
+    data.localService.runner_version !== data.localService.current_version
+  ) {
+    syncRows.push("Action: run the newer CLI once to refresh the installed background runner");
   }
   addSection(lines, "Sync", syncRows);
 

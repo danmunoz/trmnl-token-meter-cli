@@ -354,6 +354,8 @@ Interactive setup installs background sync automatically.
 
 On macOS, the CLI installs a user `launchd` agent. On Linux, it prefers a user `systemd` timer and falls back to cron when systemd user services are unavailable.
 
+When you run a newer CLI release, it refreshes the installed background runner copy in place so scheduled syncs keep using the current package version.
+
 Foreground continuous mode is available for debugging:
 
 ```bash

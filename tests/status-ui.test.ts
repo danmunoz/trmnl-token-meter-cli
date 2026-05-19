@@ -27,6 +27,8 @@ describe("status UI", () => {
             installed: true,
             method: "launchd",
             runner: "/tmp/runner.js",
+            runner_version: "0.1.1",
+            current_version: "0.1.1",
             interval_minutes: 60,
             last_sync_at: null,
             last_status: null
@@ -48,6 +50,7 @@ describe("status UI", () => {
 
       Sync
         Background sync: launchd every 60 minutes
+        Background runner version: 0.1.1 (matches current CLI)
         Last local sync: 2026-05-19T09:55:00.000Z"
     `);
   });
@@ -70,6 +73,8 @@ describe("status UI", () => {
             installed: false,
             method: null,
             runner: null,
+            runner_version: null,
+            current_version: "0.1.1",
             interval_minutes: null,
             last_sync_at: null,
             last_status: null
@@ -83,5 +88,39 @@ describe("status UI", () => {
         formatDate
       )
     ).toContain("Action: run `trmnl-token-meter add` to pair again");
+  });
+
+  it("renders a version mismatch warning for the installed background runner", () => {
+    expect(
+      renderStatusSummary(
+        {
+          credential: {
+            collector_token: "secret",
+            api_base_url: "https://api.example.test",
+            machine_id: "mach_123",
+            machine_label: "Office Mac",
+            upload_interval_minutes: 60
+          },
+          remoteStatus: null,
+          remoteError: null,
+          revoked: false,
+          localService: {
+            installed: true,
+            method: "launchd",
+            runner: "/tmp/runner.js",
+            runner_version: "0.1.0",
+            current_version: "0.1.1",
+            interval_minutes: 60,
+            last_sync_at: null,
+            last_status: null
+          },
+          syncState: {
+            last_sync_at: "2026-05-19T09:55:00.000Z",
+            last_status: "success"
+          }
+        },
+        formatDate
+      )
+    ).toContain("Action: run the newer CLI once to refresh the installed background runner");
   });
 });
