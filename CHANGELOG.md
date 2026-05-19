@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.1](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.2.0...trmnl-token-meter-0.2.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* add npm auth to release publish workflow ([0327212](https://github.com/danmunoz/trmnl-token-meter-cli/commit/0327212ac4f6b6d3b7ad604ac05465f06b00f4c4))
+* lazy-load TUI modules for background sync ([ff0cc08](https://github.com/danmunoz/trmnl-token-meter-cli/commit/ff0cc08640cfdeab399058ccd51f538d69312a35))
+* restore trusted npm publishing and background sync startup ([749d91a](https://github.com/danmunoz/trmnl-token-meter-cli/commit/749d91a3e5834038b21c0b0886983cec3390277c))
+
 ## [0.2.0](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.1.1...trmnl-token-meter-0.2.0) (2026-05-19)
 
 
