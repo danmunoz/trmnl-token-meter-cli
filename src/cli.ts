@@ -21,7 +21,6 @@ import {
   serializeAggregateForUpload,
   uploadAggregate
 } from "./upload.js";
-import { printStatusSummary } from "./status-ui.js";
 import {
   installBackgroundService,
   refreshInstalledRunner,
@@ -31,7 +30,6 @@ import {
   serviceStatus,
   uninstallBackgroundService
 } from "./service.js";
-import { ask, confirm, isPromptCancelledError, selectMenu } from "./tui.js";
 import { COLLECTOR_VERSION, DEFAULT_UPLOAD_INTERVAL_MINUTES, type AggregateSnapshot } from "./types.js";
 import { updateNotice } from "./update-check.js";
 
@@ -228,6 +226,7 @@ function formatDate(value: string | null | undefined): string {
 }
 
 async function statusCommand(config: CollectorConfig): Promise<void> {
+  const { printStatusSummary } = await import("./status-ui.js");
   let [credential, localService, syncState] = await Promise.all([
     loadCredential(config.credentialPath),
     serviceStatus(config),
@@ -301,6 +300,7 @@ async function revokeCommand(args: string[], config: CollectorConfig): Promise<v
   }
 
   if (!hasFlag(args, "--yes") && process.stdin.isTTY) {
+    const { confirm } = await import("./tui.js");
     const ok = await confirm(
       `Revoke ${credential.machine_label} and stop syncing this TRMNL meter?`,
       false
@@ -325,12 +325,13 @@ async function revokeCommand(args: string[], config: CollectorConfig): Promise<v
 async function uninstallCommand(args: string[], config: CollectorConfig): Promise<void> {
   await uninstallBackgroundService(config, { removeRunner: true }).catch(() => undefined);
   const credential = await loadCredential(config.credentialPath);
+  const { confirm } = process.stdin.isTTY ? await import("./tui.js") : { confirm: undefined };
   const shouldRevoke =
     hasFlag(args, "--revoke") ||
     (!hasFlag(args, "--keep-meter") &&
       Boolean(credential) &&
       process.stdin.isTTY &&
-      (await confirm("Also revoke this machine from the TRMNL meter?", false)));
+      (await confirm?.("Also revoke this machine from the TRMNL meter?", false)));
 
   if (shouldRevoke && credential) {
     try {
@@ -352,6 +353,7 @@ async function setupCommand(args: string[], config: CollectorConfig): Promise<vo
     throw new Error("Interactive setup requires a terminal. Use pair/service commands for scripts.");
   }
 
+  const { ask, confirm } = await import("./tui.js");
   const existing = await loadCredential(config.credentialPath);
   const previousService = existing ? await serviceStatus(config) : null;
   if (existing) {
@@ -419,6 +421,7 @@ async function menuCommand(config: CollectorConfig): Promise<void> {
     printHelp();
     return;
   }
+  const { selectMenu } = await import("./tui.js");
   const credential = await loadCredential(config.credentialPath);
   if (!credential) return setupCommand([], config);
 
@@ -491,7 +494,7 @@ function isDirectCliExecution(): boolean {
 
 if (isDirectCliExecution()) {
   main().catch((error: unknown) => {
-    if (isPromptCancelledError(error)) {
+    if (error instanceof Error && error.name === "PromptCancelledError") {
       process.stdout.write("Cancelled\n");
       return;
     }
