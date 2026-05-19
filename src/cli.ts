@@ -130,12 +130,43 @@ async function uploadCommand(config: CollectorConfig): Promise<void> {
   process.stdout.write("Upload complete\n");
 }
 
+async function applyUploadInterval(
+  config: CollectorConfig,
+  credential: NonNullable<Awaited<ReturnType<typeof loadCredential>>>,
+  intervalMinutes: number | null | undefined
+): Promise<typeof credential> {
+  if (!Number.isFinite(intervalMinutes) || !intervalMinutes || intervalMinutes < 1) return credential;
+  const normalized = Math.max(1, Math.ceil(intervalMinutes));
+  if (credential.upload_interval_minutes === normalized) return credential;
+
+  const nextCredential = { ...credential, upload_interval_minutes: normalized };
+  await saveCredential(config.credentialPath, nextCredential);
+
+  try {
+    const localService = await serviceStatus(config);
+    if (localService.installed) {
+      await installBackgroundService(config, normalized);
+    }
+  } catch (error) {
+    process.stderr.write(
+      `Warning: saved new upload interval, but could not refresh background sync: ${safeErrorMessage(error)}\n`
+    );
+  }
+
+  return nextCredential;
+}
+
 async function uploadOnce(config: CollectorConfig): Promise<void> {
   const credential = await loadCredential(config.credentialPath);
   if (!credential) throw new Error("Collector is not paired. Run pair first.");
   const snapshot = await collectSnapshot(config);
   try {
-    await uploadAggregate(credential, snapshot);
+    const response = await uploadAggregate(credential, snapshot);
+    await applyUploadInterval(
+      config,
+      credential,
+      response.next_upload_after_seconds ? response.next_upload_after_seconds / 60 : null
+    );
     await saveSyncState(config, { last_status: "success" });
   } catch (error) {
     if (isCollectorApiError(error, "collector_revoked")) {
@@ -170,13 +201,23 @@ async function runCommand(args: string[], config: CollectorConfig): Promise<void
   await uploadCommand(config);
   if (once) return;
 
-  const credential = await loadCredential(config.credentialPath);
-  const minutes = Math.max(1, credential?.upload_interval_minutes ?? DEFAULT_UPLOAD_INTERVAL_MINUTES);
-  setInterval(() => {
-    uploadCommand(config).catch((error: unknown) => {
-      process.stderr.write(`${safeErrorMessage(error)}\n`);
-    });
-  }, minutes * 60_000);
+  const scheduleNext = async (): Promise<void> => {
+    const credential = await loadCredential(config.credentialPath);
+    const minutes = Math.max(1, credential?.upload_interval_minutes ?? DEFAULT_UPLOAD_INTERVAL_MINUTES);
+    setTimeout(() => {
+      uploadCommand(config)
+        .catch((error: unknown) => {
+          process.stderr.write(`${safeErrorMessage(error)}\n`);
+        })
+        .finally(() => {
+          scheduleNext().catch((error: unknown) => {
+            process.stderr.write(`${safeErrorMessage(error)}\n`);
+          });
+        });
+    }, minutes * 60_000);
+  };
+
+  await scheduleNext();
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -187,7 +228,7 @@ function formatDate(value: string | null | undefined): string {
 }
 
 async function statusCommand(config: CollectorConfig): Promise<void> {
-  const [credential, localService, syncState] = await Promise.all([
+  let [credential, localService, syncState] = await Promise.all([
     loadCredential(config.credentialPath),
     serviceStatus(config),
     readSyncState(config)
@@ -200,6 +241,8 @@ async function statusCommand(config: CollectorConfig): Promise<void> {
   if (credential) {
     try {
       remoteStatus = await getCollectorStatus(credential);
+      credential = await applyUploadInterval(config, credential, remoteStatus.upload_interval_minutes);
+      localService = await serviceStatus(config);
     } catch (error) {
       if (isCollectorApiError(error, "collector_revoked")) {
         revoked = true;

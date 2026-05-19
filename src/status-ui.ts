@@ -17,6 +17,18 @@ function serviceLine(status: ServiceStatus): string {
   return `Background sync: ${status.method} every ${status.interval_minutes ?? "?"} minutes`;
 }
 
+function intervalLabel(minutes: number): string {
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return `${days} day${days === 1 ? "" : "s"}`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
 function runnerVersionLine(status: ServiceStatus): string | null {
   if (!status.installed) return null;
   if (!status.runner_version) return `Background runner version: unknown (current CLI ${status.current_version})`;
@@ -67,7 +79,13 @@ export function renderStatusSummary(
     }
   }
 
-  const syncRows = [serviceLine(data.localService), `Last local sync: ${formatDate(data.syncState?.last_sync_at)}`];
+  const syncRows = [
+    ...(data.credential
+      ? [`Configured upload interval: every ${intervalLabel(data.credential.upload_interval_minutes)}`]
+      : []),
+    serviceLine(data.localService),
+    `Last local sync: ${formatDate(data.syncState?.last_sync_at)}`
+  ];
   const runnerVersion = runnerVersionLine(data.localService);
   if (runnerVersion) syncRows.splice(1, 0, runnerVersion);
   if (data.syncState?.last_status === "error") {

@@ -49,8 +49,9 @@ describe("status UI", () => {
         Last server sync: 2026-05-19T10:00:00.000Z
 
       Sync
-        Background sync: launchd every 60 minutes
+        Configured upload interval: every 1 hour
         Background runner version: 0.1.1 (matches current CLI)
+        Background sync: launchd every 60 minutes
         Last local sync: 2026-05-19T09:55:00.000Z"
     `);
   });

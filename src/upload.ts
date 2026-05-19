@@ -19,6 +19,13 @@ export interface CollectorStatus {
   plugin_status: string;
   machine_status: string;
   last_received_at: string | null;
+  upload_interval_minutes?: number | null;
+}
+
+export interface UploadResponse {
+  ok: boolean;
+  next_upload_after_seconds: number | null;
+  server_time: string | null;
 }
 
 export type CollectorErrorCode =
@@ -159,7 +166,7 @@ export async function uploadAggregate(
   credential: CollectorCredential,
   snapshot: AggregateSnapshot,
   fetchImpl: typeof fetch = fetch
-): Promise<unknown> {
+): Promise<UploadResponse> {
   const url = new URL("/api/v1/usage", normalizeApiBaseUrl(credential.api_base_url));
   const response = await fetchWithPolicy(
     "upload",
@@ -180,7 +187,17 @@ export async function uploadAggregate(
   if (!response.ok) {
     throwCollectorError("upload", response, body);
   }
-  return body;
+  return {
+    ok: body && typeof body === "object" ? (body as Record<string, unknown>).ok === true : false,
+    next_upload_after_seconds:
+      body && typeof body === "object" && Number.isFinite((body as Record<string, unknown>).next_upload_after_seconds)
+        ? Number((body as Record<string, unknown>).next_upload_after_seconds)
+        : null,
+    server_time:
+      body && typeof body === "object" && typeof (body as Record<string, unknown>).server_time === "string"
+        ? String((body as Record<string, unknown>).server_time)
+        : null
+  };
 }
 
 export async function pairCollector(
@@ -244,7 +261,11 @@ export async function getCollectorStatus(
     ok: body.ok === true,
     plugin_status: String(body.plugin_status ?? "unknown"),
     machine_status: String(body.machine_status ?? "unknown"),
-    last_received_at: typeof body.last_received_at === "string" ? body.last_received_at : null
+    last_received_at: typeof body.last_received_at === "string" ? body.last_received_at : null,
+    upload_interval_minutes:
+      typeof body.upload_interval_minutes === "number" && Number.isFinite(body.upload_interval_minutes)
+        ? Math.max(1, Math.ceil(body.upload_interval_minutes))
+        : null
   };
 }
 

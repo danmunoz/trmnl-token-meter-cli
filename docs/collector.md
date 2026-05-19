@@ -150,6 +150,11 @@ Published setup installs background sync. The service runs a one-shot upload on
 the configured interval, so syncing continues after the terminal closes and after
 normal restarts.
 
+The TRMNL management page now controls the collector upload cadence with three
+presets: `1 hour` (default), `4 hours`, and `24 hours`. The CLI stores that
+setting locally when pairing, and later `status` or successful uploads refresh
+the installed scheduler if the backend preference changed.
+
 Use this command for the scheduler or a manual one-shot sync:
 
 ```bash
@@ -158,7 +163,7 @@ npx trmnl-token-meter sync --once
 
 Foreground continuous mode is still available for development and debugging:
 
-To upload on the default 60-minute interval:
+To upload on the configured interval:
 
 ```bash
 npx trmnl-token-meter run

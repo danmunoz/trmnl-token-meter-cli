@@ -46,17 +46,22 @@ describe("upload client", () => {
       })
     );
 
-    await uploadAggregate(
-      {
-        collector_token: "secret-token",
-        api_base_url: "https://api.example.test",
-        machine_id: "mach",
-        machine_label: "Machine",
-        upload_interval_minutes: 60
-      },
-      snapshot,
-      fetchMock
-    );
+    await expect(
+      uploadAggregate(
+        {
+          collector_token: "secret-token",
+          api_base_url: "https://api.example.test",
+          machine_id: "mach",
+          machine_label: "Machine",
+          upload_interval_minutes: 60
+        },
+        snapshot,
+        fetchMock
+      )
+    ).resolves.toMatchObject({
+      ok: true,
+      next_upload_after_seconds: null
+    });
 
     expect(fetchMock).toHaveBeenCalledWith(
       new URL("/api/v1/usage", "https://api.example.test"),
@@ -139,7 +144,8 @@ describe("upload client", () => {
           ok: true,
           plugin_status: "active",
           machine_status: "active",
-          last_received_at: "2026-05-15T12:00:00.000Z"
+          last_received_at: "2026-05-15T12:00:00.000Z",
+          upload_interval_minutes: 240
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       )
@@ -156,7 +162,11 @@ describe("upload client", () => {
         },
         fetchMock
       )
-    ).resolves.toMatchObject({ plugin_status: "active", machine_status: "active" });
+    ).resolves.toMatchObject({
+      plugin_status: "active",
+      machine_status: "active",
+      upload_interval_minutes: 240
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       new URL("/api/v1/status", "https://api.example.test"),
       expect.objectContaining({
@@ -313,5 +323,31 @@ describe("upload client", () => {
     } finally {
       delete process.env.TRMNL_TOKEN_METER_REQUEST_TIMEOUT_MS;
     }
+  });
+
+  it("returns next upload timing from successful uploads", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, next_upload_after_seconds: 14400 }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    await expect(
+      uploadAggregate(
+        {
+          collector_token: "secret-token",
+          api_base_url: "https://api.example.test",
+          machine_id: "mach",
+          machine_label: "Machine",
+          upload_interval_minutes: 60
+        },
+        snapshot,
+        fetchMock
+      )
+    ).resolves.toMatchObject({
+      ok: true,
+      next_upload_after_seconds: 14400
+    });
   });
 });
