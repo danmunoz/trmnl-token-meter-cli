@@ -50,7 +50,7 @@ describe("background service support", () => {
       installed_at: "2026-05-15T12:00:00.000Z",
       method: "launchd",
       runner,
-      interval_minutes: 15
+      interval_minutes: 60
     };
     await writeFile(config.serviceMetadataPath, `${JSON.stringify(metadata)}\n`);
     await saveSyncState(config, { last_status: "success" });
@@ -58,7 +58,7 @@ describe("background service support", () => {
     await expect(serviceStatus(config)).resolves.toMatchObject({
       method: "launchd",
       runner,
-      interval_minutes: 15,
+      interval_minutes: 60,
       last_status: "success"
     });
   });

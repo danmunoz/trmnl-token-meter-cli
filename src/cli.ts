@@ -30,7 +30,7 @@ import {
   serviceStatus,
   uninstallBackgroundService
 } from "./service.js";
-import { COLLECTOR_VERSION, type AggregateSnapshot } from "./types.js";
+import { COLLECTOR_VERSION, DEFAULT_UPLOAD_INTERVAL_MINUTES, type AggregateSnapshot } from "./types.js";
 import { updateNotice } from "./update-check.js";
 
 function argValue(args: string[], name: string): string | undefined {
@@ -169,7 +169,7 @@ async function runCommand(args: string[], config: CollectorConfig): Promise<void
   if (once) return;
 
   const credential = await loadCredential(config.credentialPath);
-  const minutes = Math.max(1, credential?.upload_interval_minutes ?? 15);
+  const minutes = Math.max(1, credential?.upload_interval_minutes ?? DEFAULT_UPLOAD_INTERVAL_MINUTES);
   setInterval(() => {
     uploadCommand(config).catch((error: unknown) => {
       process.stderr.write(`${safeErrorMessage(error)}\n`);

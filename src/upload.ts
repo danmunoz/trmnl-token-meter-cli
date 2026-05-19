@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { normalizeApiBaseUrl } from "./config.js";
 import { safeErrorMessage } from "./redact.js";
-import type { AggregateSnapshot, CollectorCredential } from "./types.js";
+import { DEFAULT_UPLOAD_INTERVAL_MINUTES, type AggregateSnapshot, type CollectorCredential } from "./types.js";
 
 const allowedTopLevelKeys = [
   "schema_version",
@@ -219,7 +219,7 @@ export async function pairCollector(
     api_base_url: normalizeApiBaseUrl(body.api_base_url, { expectedOrigin }),
     machine_id: body.machine_id,
     machine_label: machineLabel,
-    upload_interval_minutes: body.upload_interval_minutes ?? 15
+    upload_interval_minutes: body.upload_interval_minutes ?? DEFAULT_UPLOAD_INTERVAL_MINUTES
   };
 }
 

@@ -150,7 +150,7 @@ npx trmnl-token-meter sync --once
 
 Foreground continuous mode is still available for development and debugging:
 
-To upload on the default 15-minute interval:
+To upload on the default 60-minute interval:
 
 ```bash
 npx trmnl-token-meter run

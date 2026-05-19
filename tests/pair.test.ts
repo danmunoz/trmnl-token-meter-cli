@@ -37,7 +37,7 @@ describe("pair command", () => {
           collector_token: "collector-secret",
           api_base_url: "https://api.example.test",
           machine_id: "mach_pair",
-          upload_interval_minutes: 15
+          upload_interval_minutes: 60
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       )
@@ -67,7 +67,7 @@ describe("pair command", () => {
       api_base_url: "https://api.example.test",
       machine_id: "mach_existing",
       machine_label: "Existing",
-      upload_interval_minutes: 15
+      upload_interval_minutes: 60
     });
     const fetchMock = vi.spyOn(globalThis, "fetch");
 

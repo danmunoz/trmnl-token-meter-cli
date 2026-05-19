@@ -56,7 +56,7 @@ describe("collector CLI", () => {
           collector_token: "secret-token",
           api_base_url: "https://api.example.test",
           machine_id: "mach_cli",
-          upload_interval_minutes: 15
+          upload_interval_minutes: 60
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       )
@@ -87,7 +87,7 @@ describe("collector CLI", () => {
             collector_token: "secret-token",
             api_base_url: "https://api.example.test",
             machine_id: "mach_cli",
-            upload_interval_minutes: 15
+            upload_interval_minutes: 60
           }),
           { status: 200, headers: { "content-type": "application/json" } }
         )
@@ -116,7 +116,7 @@ describe("collector CLI", () => {
             collector_token: "secret-token",
             api_base_url: "https://api.example.test",
             machine_id: "mach_cli",
-            upload_interval_minutes: 15
+            upload_interval_minutes: 60
           }),
           { status: 200, headers: { "content-type": "application/json" } }
         )
