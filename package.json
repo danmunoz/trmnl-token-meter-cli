@@ -1,6 +1,6 @@
 {
   "name": "trmnl-token-meter",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Local Codex usage collector for the TRMNL Token Meter plugin.",
   "private": false,
   "type": "module",
