@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
 import { hostname } from "node:os";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { buildAggregate } from "./aggregate.js";
 import {
@@ -22,14 +21,17 @@ import {
   serializeAggregateForUpload,
   uploadAggregate
 } from "./upload.js";
+import { printStatusSummary } from "./status-ui.js";
 import {
   installBackgroundService,
+  refreshInstalledRunner,
   isSyncDue,
   readSyncState,
   saveSyncState,
   serviceStatus,
   uninstallBackgroundService
 } from "./service.js";
+import { ask, confirm, isPromptCancelledError, selectMenu } from "./tui.js";
 import { COLLECTOR_VERSION, DEFAULT_UPLOAD_INTERVAL_MINUTES, type AggregateSnapshot } from "./types.js";
 import { updateNotice } from "./update-check.js";
 
@@ -128,12 +130,43 @@ async function uploadCommand(config: CollectorConfig): Promise<void> {
   process.stdout.write("Upload complete\n");
 }
 
+async function applyUploadInterval(
+  config: CollectorConfig,
+  credential: NonNullable<Awaited<ReturnType<typeof loadCredential>>>,
+  intervalMinutes: number | null | undefined
+): Promise<typeof credential> {
+  if (!Number.isFinite(intervalMinutes) || !intervalMinutes || intervalMinutes < 1) return credential;
+  const normalized = Math.max(1, Math.ceil(intervalMinutes));
+  if (credential.upload_interval_minutes === normalized) return credential;
+
+  const nextCredential = { ...credential, upload_interval_minutes: normalized };
+  await saveCredential(config.credentialPath, nextCredential);
+
+  try {
+    const localService = await serviceStatus(config);
+    if (localService.installed) {
+      await installBackgroundService(config, normalized);
+    }
+  } catch (error) {
+    process.stderr.write(
+      `Warning: saved new upload interval, but could not refresh background sync: ${safeErrorMessage(error)}\n`
+    );
+  }
+
+  return nextCredential;
+}
+
 async function uploadOnce(config: CollectorConfig): Promise<void> {
   const credential = await loadCredential(config.credentialPath);
   if (!credential) throw new Error("Collector is not paired. Run pair first.");
   const snapshot = await collectSnapshot(config);
   try {
-    await uploadAggregate(credential, snapshot);
+    const response = await uploadAggregate(credential, snapshot);
+    await applyUploadInterval(
+      config,
+      credential,
+      response.next_upload_after_seconds ? response.next_upload_after_seconds / 60 : null
+    );
     await saveSyncState(config, { last_status: "success" });
   } catch (error) {
     if (isCollectorApiError(error, "collector_revoked")) {
@@ -168,35 +201,23 @@ async function runCommand(args: string[], config: CollectorConfig): Promise<void
   await uploadCommand(config);
   if (once) return;
 
-  const credential = await loadCredential(config.credentialPath);
-  const minutes = Math.max(1, credential?.upload_interval_minutes ?? DEFAULT_UPLOAD_INTERVAL_MINUTES);
-  setInterval(() => {
-    uploadCommand(config).catch((error: unknown) => {
-      process.stderr.write(`${safeErrorMessage(error)}\n`);
-    });
-  }, minutes * 60_000);
-}
+  const scheduleNext = async (): Promise<void> => {
+    const credential = await loadCredential(config.credentialPath);
+    const minutes = Math.max(1, credential?.upload_interval_minutes ?? DEFAULT_UPLOAD_INTERVAL_MINUTES);
+    setTimeout(() => {
+      uploadCommand(config)
+        .catch((error: unknown) => {
+          process.stderr.write(`${safeErrorMessage(error)}\n`);
+        })
+        .finally(() => {
+          scheduleNext().catch((error: unknown) => {
+            process.stderr.write(`${safeErrorMessage(error)}\n`);
+          });
+        });
+    }, minutes * 60_000);
+  };
 
-function openPrompt() {
-  return createInterface({ input: process.stdin, output: process.stdout });
-}
-
-async function ask(question: string, fallback = ""): Promise<string> {
-  const prompt = fallback ? `${question} (${fallback}): ` : `${question}: `;
-  const rl = openPrompt();
-  try {
-    const answer = (await rl.question(prompt)).trim();
-    return answer || fallback;
-  } finally {
-    rl.close();
-  }
-}
-
-async function confirm(question: string, fallback = false): Promise<boolean> {
-  const suffix = fallback ? "Y/n" : "y/N";
-  const answer = (await ask(`${question} [${suffix}]`)).toLowerCase();
-  if (!answer) return fallback;
-  return answer === "y" || answer === "yes";
+  await scheduleNext();
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -207,44 +228,46 @@ function formatDate(value: string | null | undefined): string {
 }
 
 async function statusCommand(config: CollectorConfig): Promise<void> {
-  const [credential, localService, syncState] = await Promise.all([
+  let [credential, localService, syncState] = await Promise.all([
     loadCredential(config.credentialPath),
     serviceStatus(config),
     readSyncState(config)
   ]);
 
-  process.stdout.write("TRMNL Token Meter Status\n\n");
-  if (!credential) {
-    process.stdout.write("Meter: not paired\n");
-  } else {
-    process.stdout.write(`Meter: paired as ${credential.machine_label} (${credential.machine_id})\n`);
+  let remoteStatus = null;
+  let remoteError: string | null = null;
+  let revoked = false;
+
+  if (credential) {
     try {
-      const remote = await getCollectorStatus(credential);
-      process.stdout.write(`Server: ${remote.plugin_status} plugin, ${remote.machine_status} device\n`);
-      process.stdout.write(`Last server sync: ${formatDate(remote.last_received_at)}\n`);
+      remoteStatus = await getCollectorStatus(credential);
+      credential = await applyUploadInterval(config, credential, remoteStatus.upload_interval_minutes);
+      localService = await serviceStatus(config);
     } catch (error) {
       if (isCollectorApiError(error, "collector_revoked")) {
-        process.stdout.write("Server: revoked\n");
-        process.stdout.write(
-          "This machine is no longer authorized to upload. Run `trmnl-token-meter add` to pair again, or `trmnl-token-meter uninstall` to remove local credentials.\n"
-        );
+        revoked = true;
       } else {
-        process.stdout.write(`Server: ${safeErrorMessage(error)}\n`);
+        remoteError = safeErrorMessage(error);
       }
     }
   }
 
-  process.stdout.write(
-    `Background sync: ${
-      localService.installed
-        ? `${localService.method} every ${localService.interval_minutes ?? "?"} minutes`
-        : "not installed"
-    }\n`
+  printStatusSummary(
+    {
+      credential,
+      remoteStatus,
+      remoteError,
+      revoked,
+      localService,
+      syncState: syncState
+        ? {
+            ...syncState,
+            ...(syncState.last_error ? { last_error: safeErrorMessage(syncState.last_error) } : {})
+          }
+        : null
+    },
+    formatDate
   );
-  process.stdout.write(`Last local sync: ${formatDate(syncState?.last_sync_at)}\n`);
-  if (syncState?.last_status === "error") {
-    process.stdout.write(`Last sync error: ${safeErrorMessage(syncState.last_error)}\n`);
-  }
 }
 
 async function installServiceCommand(config: CollectorConfig): Promise<void> {
@@ -402,20 +425,21 @@ async function menuCommand(config: CollectorConfig): Promise<void> {
   process.stdout.write(`TRMNL Token Meter
 
 Paired meter: ${credential.machine_label}
-
 `);
-  process.stdout.write("1. View status\n");
-  process.stdout.write("2. Sync now\n");
-  process.stdout.write("3. Add or replace meter\n");
-  process.stdout.write("4. Revoke meter\n");
-  process.stdout.write("5. Uninstall background sync\n");
-  process.stdout.write("6. Quit\n\n");
-  const choice = await ask("Choose an option", "1");
-  if (choice === "1") return statusCommand(config);
-  if (choice === "2") return uploadCommand(config);
-  if (choice === "3") return setupCommand(["--replace"], config);
-  if (choice === "4") return revokeCommand([], config);
-  if (choice === "5") return uninstallCommand([], config);
+  const choice = await selectMenu("Choose an action", [
+    { label: "View status", value: "status" },
+    { label: "Sync now", value: "sync" },
+    { label: "Add or replace meter", value: "setup" },
+    { label: "Revoke meter", value: "revoke" },
+    { label: "Uninstall background sync", value: "uninstall" },
+    { label: "Quit", value: "quit" }
+  ]);
+  if (!choice || choice === "quit") return;
+  if (choice === "status") return statusCommand(config);
+  if (choice === "sync") return uploadCommand(config);
+  if (choice === "setup") return setupCommand(["--replace"], config);
+  if (choice === "revoke") return revokeCommand([], config);
+  if (choice === "uninstall") return uninstallCommand([], config);
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
@@ -429,13 +453,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       loadedConfig.includePiSessions
   };
   await ensureCollectorDirs(config);
-  if (shouldCheckForUpdates(command, argv)) await maybePrintUpdateNotice(config, argv);
 
   if (command === "--help" || command === "-h" || command === "help") return printHelp();
   if (command === "--version" || command === "-v" || command === "version") {
     process.stdout.write(`${COLLECTOR_VERSION}\n`);
     return;
   }
+
+  await refreshInstalledRunner(config).catch((error) => {
+    process.stderr.write(`Warning: could not refresh the background runner: ${safeErrorMessage(error)}\n`);
+  });
+  if (shouldCheckForUpdates(command, argv)) await maybePrintUpdateNotice(config, argv);
+
   if (argv.length === 0 || command === "menu") return menuCommand(config);
   if (command === "setup" || command === "add") return setupCommand(args, config);
   if (command === "status") return statusCommand(config);
@@ -462,6 +491,10 @@ function isDirectCliExecution(): boolean {
 
 if (isDirectCliExecution()) {
   main().catch((error: unknown) => {
+    if (isPromptCancelledError(error)) {
+      process.stdout.write("Cancelled\n");
+      return;
+    }
     process.stderr.write(`${safeErrorMessage(error)}\n`);
     process.exitCode = 1;
   });

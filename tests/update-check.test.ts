@@ -1,11 +1,20 @@
 import { mkdtemp, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { COLLECTOR_VERSION } from "../src/types.js";
 import { isNewerVersion, updateNotice } from "../src/update-check.js";
 
+const require = createRequire(import.meta.url);
+const packageJson = require("../package.json") as { version?: unknown };
+
 describe("update check", () => {
+  it("uses the package version as the collector version", () => {
+    expect(COLLECTOR_VERSION).toBe(packageJson.version);
+  });
+
   it("compares semantic versions", () => {
     expect(isNewerVersion("0.1.1", "0.1.0")).toBe(true);
     expect(isNewerVersion("0.2.0", "0.1.9")).toBe(true);

@@ -6,6 +6,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { CollectorConfig } from "./config.js";
+import { COLLECTOR_VERSION } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 const SERVICE_LABEL = "com.trmnl.token-meter.sync";
@@ -17,6 +18,7 @@ export interface ServiceMetadata {
   method: "launchd" | "systemd" | "cron";
   runner: string;
   interval_minutes: number;
+  runner_version?: string;
 }
 
 export interface SyncState {
@@ -29,6 +31,8 @@ export interface ServiceStatus {
   installed: boolean;
   method: ServiceMetadata["method"] | null;
   runner: string | null;
+  runner_version: string | null;
+  current_version: string;
   interval_minutes: number | null;
   last_sync_at: string | null;
   last_status: SyncState["last_status"];
@@ -85,11 +89,15 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+function stableRunnerDir(config: CollectorConfig): string {
+  return join(config.serviceDir, "dist");
+}
+
 export async function installStableRunner(
   config: CollectorConfig,
   sourceDir = stableRunnerSourceDir()
 ): Promise<string> {
-  const distDir = join(config.serviceDir, "dist");
+  const distDir = stableRunnerDir(config);
   if (!(await pathExists(join(sourceDir, "cli.js")))) {
     throw new Error("Could not find a built CLI runtime. Run `pnpm build` before installing background sync.");
   }
@@ -232,6 +240,12 @@ async function installCron(
   await runCommand("crontab", [file]);
 }
 
+async function writeServiceMetadata(config: CollectorConfig, metadata: ServiceMetadata): Promise<void> {
+  await writeFile(config.serviceMetadataPath, `${JSON.stringify(metadata, null, 2)}\n`, {
+    mode: 0o600
+  });
+}
+
 export async function installBackgroundService(
   config: CollectorConfig,
   intervalMinutes: number,
@@ -260,11 +274,10 @@ export async function installBackgroundService(
     installed_at: new Date().toISOString(),
     method,
     runner,
-    interval_minutes: intervalMinutes
+    interval_minutes: intervalMinutes,
+    runner_version: COLLECTOR_VERSION
   };
-  await writeFile(config.serviceMetadataPath, `${JSON.stringify(metadata, null, 2)}\n`, {
-    mode: 0o600
-  });
+  await writeServiceMetadata(config, metadata);
   return metadata;
 }
 
@@ -313,6 +326,52 @@ async function readServiceMetadata(config: CollectorConfig): Promise<ServiceMeta
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
+  }
+}
+
+export async function refreshInstalledRunner(
+  config: CollectorConfig,
+  options: { sourceDir?: string } = {}
+): Promise<boolean> {
+  const metadata = await readServiceMetadata(config);
+  if (!metadata) return false;
+
+  const sourceDir = options.sourceDir ?? stableRunnerSourceDir();
+  const distDir = stableRunnerDir(config);
+  const expectedRunner = join(distDir, "cli.js");
+
+  if (sourceDir === distDir) return false;
+  if (!(await pathExists(join(sourceDir, "cli.js")))) return false;
+  if (
+    metadata.runner === expectedRunner &&
+    metadata.runner_version === COLLECTOR_VERSION &&
+    (await pathExists(expectedRunner))
+  ) {
+    return false;
+  }
+
+  const runner = await installStableRunner(config, sourceDir);
+  await writeServiceMetadata(config, {
+    ...metadata,
+    runner,
+    runner_version: COLLECTOR_VERSION
+  });
+  return true;
+}
+
+async function readRunnerVersion(metadata: ServiceMetadata | null): Promise<string | null> {
+  if (!metadata?.runner || !(await pathExists(metadata.runner))) {
+    return metadata?.runner_version ?? null;
+  }
+
+  try {
+    const version = (await defaultTextRunner(process.execPath, [metadata.runner, "--version", "--no-update-check"]))
+      .trim()
+      .split("\n")[0]
+      ?.trim();
+    return version || metadata.runner_version || null;
+  } catch {
+    return metadata?.runner_version ?? null;
   }
 }
 
@@ -393,6 +452,7 @@ async function schedulerInstalled(
 
 export async function serviceStatus(config: CollectorConfig): Promise<ServiceStatus> {
   const [metadata, state] = await Promise.all([readServiceMetadata(config), readSyncState(config)]);
+  const runnerVersion = await readRunnerVersion(metadata);
   const installed =
     Boolean(metadata && (await pathExists(metadata.runner))) &&
     Boolean(metadata && (await schedulerInstalled(config, metadata)));
@@ -400,6 +460,8 @@ export async function serviceStatus(config: CollectorConfig): Promise<ServiceSta
     installed,
     method: metadata?.method ?? null,
     runner: metadata?.runner ?? null,
+    runner_version: runnerVersion,
+    current_version: COLLECTOR_VERSION,
     interval_minutes: metadata?.interval_minutes ?? null,
     last_sync_at: state?.last_sync_at ?? null,
     last_status: state?.last_status ?? null,

@@ -1,5 +1,11 @@
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const packageJson = require("../package.json") as { version?: unknown };
+
 export const AGGREGATE_SCHEMA_VERSION = "2026-05-15.v2-codexbar-cost";
-export const COLLECTOR_VERSION = "0.1.0";
+export const COLLECTOR_VERSION =
+  typeof packageJson.version === "string" ? packageJson.version : "0.0.0-development";
 export const COST_ENGINE_VERSION = "2026-05-15.codexbar-parity";
 export const DEFAULT_UPLOAD_INTERVAL_MINUTES = 60;
 

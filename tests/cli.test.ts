@@ -104,8 +104,46 @@ describe("collector CLI", () => {
 
     await main(["status"]);
 
+    expect(stdout).toContain("Server");
     expect(stdout).toContain("Server: revoked");
     expect(stdout).toContain("trmnl-token-meter add");
+  });
+
+  it("reconciles the locally stored upload interval from status responses", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            collector_token: "secret-token",
+            api_base_url: "https://api.example.test",
+            machine_id: "mach_cli",
+            upload_interval_minutes: 60
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            plugin_status: "active",
+            machine_status: "active",
+            last_received_at: "2026-05-15T12:00:00.000Z",
+            upload_interval_minutes: 240
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+
+    await main(["pair", "--code", "ABCD-1234", "--machine-label", "CLI Machine"]);
+    stdout = "";
+
+    await main(["status"]);
+
+    await expect(readFile(process.env.TRMNL_TOKEN_METER_CONFIG_DIR + "/credentials.json", "utf8")).resolves.toContain(
+      '"upload_interval_minutes": 240'
+    );
+    expect(stdout).toContain("Configured upload interval: every 4 hours");
   });
 
   it("treats already-revoked server credentials as local revoke success", async () => {

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -34,8 +34,18 @@ async function main() {
       ["--version"],
       { cwd: sandbox }
     );
-    if (!version.trim()) {
+    const cliVersion = version.trim();
+    if (!cliVersion) {
       throw new Error("packed CLI did not print a version");
+    }
+
+    const installedPackage = JSON.parse(
+      await readFile(join(sandbox, "node_modules", "trmnl-token-meter", "package.json"), "utf8")
+    );
+    if (cliVersion !== installedPackage.version) {
+      throw new Error(
+        `packed CLI version mismatch: CLI reported ${cliVersion}, package.json reported ${String(installedPackage.version)}`
+      );
     }
   } finally {
     await rm(join(repoRoot, tarball), { force: true });

@@ -184,6 +184,8 @@ Open setup or the local control menu:
 npx trmnl-token-meter
 ```
 
+When a terminal is attached, the control menu uses arrow-key selection and Enter to confirm.
+
 Show current pairing, background sync, and server status:
 
 ```bash
@@ -222,6 +224,11 @@ After pairing, the CLI installs a local background job so the display keeps upda
 
 - macOS: `launchd`
 - Linux: `systemd` when available, otherwise `cron`
+
+The TRMNL management page controls the collector upload cadence with `1 hour`
+(default), `4 hours`, and `24 hours` presets. Running `status` or completing a
+successful upload lets the CLI refresh the local scheduler when that preference
+changes.
 
 Use `npx trmnl-token-meter status` to inspect whether background sync is installed and when the last local/server sync completed.
 
@@ -351,6 +358,12 @@ npx trmnl-token-meter collect --include-pi-sessions
 Interactive setup installs background sync automatically.
 
 On macOS, the CLI installs a user `launchd` agent. On Linux, it prefers a user `systemd` timer and falls back to cron when systemd user services are unavailable.
+
+When you run a newer CLI release, it refreshes the installed background runner copy in place so scheduled syncs keep using the current package version.
+
+The TRMNL management page controls the collector upload cadence with `1 hour`
+(default), `4 hours`, and `24 hours` presets. The CLI reconciles that cadence on
+pair, `status`, and successful uploads.
 
 Foreground continuous mode is available for debugging:
 

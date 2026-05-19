@@ -19,6 +19,10 @@ does not depend on the temporary `npx` cache after setup. On macOS it installs a
 user `launchd` agent. On Linux it prefers a user `systemd` timer and falls back
 to cron when systemd user services are unavailable.
 
+When you run a newer CLI release, the collector refreshes that installed runtime
+copy in place so background sync stays on the same version as the CLI you just
+launched.
+
 For scripts or troubleshooting, the non-interactive pairing command remains:
 
 ```bash
@@ -53,6 +57,10 @@ npx trmnl-token-meter add
 npx trmnl-token-meter revoke
 npx trmnl-token-meter uninstall
 ```
+
+`status` also reports the installed background runner version. That is the copied
+CLI runtime your scheduler actually launches, so it is the right value to check
+after an upgrade.
 
 Human-facing commands check npm for a newer `trmnl-token-meter` version at most
 once per day and print a non-blocking update notice when one is available. Skip
@@ -142,6 +150,11 @@ Published setup installs background sync. The service runs a one-shot upload on
 the configured interval, so syncing continues after the terminal closes and after
 normal restarts.
 
+The TRMNL management page now controls the collector upload cadence with three
+presets: `1 hour` (default), `4 hours`, and `24 hours`. The CLI stores that
+setting locally when pairing, and later `status` or successful uploads refresh
+the installed scheduler if the backend preference changed.
+
 Use this command for the scheduler or a manual one-shot sync:
 
 ```bash
@@ -150,7 +163,7 @@ npx trmnl-token-meter sync --once
 
 Foreground continuous mode is still available for development and debugging:
 
-To upload on the default 60-minute interval:
+To upload on the configured interval:
 
 ```bash
 npx trmnl-token-meter run
