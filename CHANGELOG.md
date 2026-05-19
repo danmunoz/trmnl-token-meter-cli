@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.1.1...trmnl-token-meter-0.2.0) (2026-05-19)
+
+
+### Features
+
+* add TUI workflow and refresh reconciliation ([bd152bd](https://github.com/danmunoz/trmnl-token-meter-cli/commit/bd152bd082e69ba85d88a44e205b01e77c5bc641))
+
 ## [0.1.1](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.1.0...trmnl-token-meter-0.1.1) (2026-05-19)
 
 
