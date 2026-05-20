@@ -51,6 +51,16 @@ const defaultTextRunner: TextRunner = async (file, args) => {
   return String(result.stdout);
 };
 
+function commandFailureMessage(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const failure = error as Error & { stderr?: unknown; stdout?: unknown };
+  const stderr = typeof failure.stderr === "string" ? failure.stderr.trim() : "";
+  const stdout = typeof failure.stdout === "string" ? failure.stdout.trim() : "";
+  if (stderr) return `${failure.message}: ${stderr}`;
+  if (stdout) return `${failure.message}: ${stdout}`;
+  return failure.message;
+}
+
 const xmlEscape = (value: string): string =>
   value
     .replaceAll("&", "&amp;")
@@ -93,6 +103,24 @@ function stableRunnerDir(config: CollectorConfig): string {
   return join(config.serviceDir, "dist");
 }
 
+async function verifyStableRunner(runner: string): Promise<void> {
+  try {
+    const version = (
+      await defaultTextRunner(process.execPath, [runner, "--version", "--no-update-check"])
+    )
+      .trim()
+      .split("\n")[0]
+      ?.trim();
+    if (version !== COLLECTOR_VERSION) {
+      throw new Error(
+        `expected ${COLLECTOR_VERSION}, received ${version && version.length > 0 ? version : "empty output"}`
+      );
+    }
+  } catch (error) {
+    throw new Error(`Could not verify service runner installation: ${commandFailureMessage(error)}`);
+  }
+}
+
 export async function installStableRunner(
   config: CollectorConfig,
   sourceDir = stableRunnerSourceDir()
@@ -107,10 +135,24 @@ export async function installStableRunner(
     recursive: true,
     filter: (source) => basename(source) !== "node_modules"
   });
-  await writeFile(join(config.serviceDir, "package.json"), "{\"type\":\"module\"}\n", {
-    mode: 0o600
-  });
-  return join(distDir, "cli.js");
+  await writeFile(
+    join(config.serviceDir, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "trmnl-token-meter",
+        type: "module",
+        version: COLLECTOR_VERSION
+      },
+      null,
+      2
+    )}\n`,
+    {
+      mode: 0o600
+    }
+  );
+  const runner = join(distDir, "cli.js");
+  await verifyStableRunner(runner);
+  return runner;
 }
 
 function launchdPlist(config: CollectorConfig, runner: string, intervalMinutes: number): string {

@@ -42,7 +42,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup src/cli.ts --format esm --dts --clean",
+    "build": "tsup --config tsup.config.ts",
     "dev": "tsx src/cli.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
