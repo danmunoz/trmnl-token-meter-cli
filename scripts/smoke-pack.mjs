@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -45,6 +45,33 @@ async function main() {
     if (cliVersion !== installedPackage.version) {
       throw new Error(
         `packed CLI version mismatch: CLI reported ${cliVersion}, package.json reported ${String(installedPackage.version)}`
+      );
+    }
+
+    const serviceSandbox = join(sandbox, "service-runner");
+    await cp(join(sandbox, "node_modules", "trmnl-token-meter", "dist"), join(serviceSandbox, "dist"), {
+      recursive: true
+    });
+    await writeFile(
+      join(serviceSandbox, "package.json"),
+      JSON.stringify(
+        {
+          name: "trmnl-token-meter",
+          type: "module",
+          version: installedPackage.version
+        },
+        null,
+        2
+      )
+    );
+    const { stdout: isolatedVersion } = await execFileAsync(
+      process.execPath,
+      [join(serviceSandbox, "dist", "cli.js"), "--version", "--no-update-check"],
+      { cwd: serviceSandbox }
+    );
+    if (isolatedVersion.trim() !== installedPackage.version) {
+      throw new Error(
+        `isolated service runner version mismatch: runner reported ${isolatedVersion.trim()}, package.json reported ${String(installedPackage.version)}`
       );
     }
   } finally {
