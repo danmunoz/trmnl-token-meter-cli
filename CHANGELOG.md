@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.2.1...trmnl-token-meter-0.2.2) (2026-05-20)
+
+
+### Bug Fixes
+
+* bundle service runner dependencies ([53ec631](https://github.com/danmunoz/trmnl-token-meter-cli/commit/53ec6317111785a0aecdbd0bafeaa7fc0d07d0a4))
+* bundle service runner dependencies ([013f88e](https://github.com/danmunoz/trmnl-token-meter-cli/commit/013f88e924fcf0c6efe5acfd4033296e5d212b62))
+
 ## [0.2.1](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.2.0...trmnl-token-meter-0.2.1) (2026-05-19)
 
 
