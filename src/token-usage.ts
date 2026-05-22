@@ -124,17 +124,14 @@ export function normalizeTokenUsageRecord(
   const payload = objectField(object.payload);
   const info = objectField(payload?.info);
   const nestedTokenCount = object.type === "event_msg" && payload?.type === "token_count";
-  const usage =
+  const hasTotalUsage =
     info?.total_token_usage ??
     info?.totalTokenUsage ??
-    info?.last_token_usage ??
-    info?.lastTokenUsage ??
     object.total_token_usage ??
-    object.totalTokenUsage ??
-    object.last_token_usage ??
-    object.lastTokenUsage ??
-    object.token_usage ??
-    object.usage;
+    object.totalTokenUsage;
+  const hasLastUsage =
+    info?.last_token_usage ?? info?.lastTokenUsage ?? object.last_token_usage ?? object.lastTokenUsage;
+  const usage = hasLastUsage ?? hasTotalUsage ?? object.token_usage ?? object.usage;
 
   if (!usage || typeof usage !== "object") return { malformed: false };
   const usageObject = usage as Record<string, unknown>;
@@ -165,13 +162,7 @@ export function normalizeTokenUsageRecord(
       object.session_id ?? object.sessionId ?? object.conversation_id ?? context.sessionId,
       "unknown"
     ),
-    record_kind:
-      (info?.total_token_usage ??
-      info?.totalTokenUsage ??
-      object.total_token_usage ??
-      object.totalTokenUsage)
-        ? "cumulative"
-        : "delta"
+    record_kind: hasLastUsage ? "delta" : hasTotalUsage ? "cumulative" : "delta"
   };
   event.long_context =
     booleanOrUnknown(
