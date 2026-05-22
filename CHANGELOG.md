@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.2.2...trmnl-token-meter-0.2.3) (2026-05-22)
+
+
+### Bug Fixes
+
+* improve token calculation accuracy ([d857e0b](https://github.com/danmunoz/trmnl-token-meter-cli/commit/d857e0b99afd82c7ef6a47cb6d483bc1e8f3fa2d))
+* improve token calculation accuracy ([c00df7e](https://github.com/danmunoz/trmnl-token-meter-cli/commit/c00df7ef1525225ecdef8b96e81e47e647e21747))
+
 ## [0.2.2](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.2.1...trmnl-token-meter-0.2.2) (2026-05-20)
 
 
