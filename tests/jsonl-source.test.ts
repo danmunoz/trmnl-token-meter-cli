@@ -79,10 +79,12 @@ describe("Codex JSONL source", () => {
       now: new Date("2026-05-15T12:00:00.000Z"),
       warnings: result.warnings
     });
-    expect(snapshot.periods.today.input_tokens).toBe(200);
-    expect(snapshot.periods.today.cached_input_tokens).toBe(35);
-    expect(snapshot.periods.today.output_tokens).toBe(90);
-    expect(snapshot.models.map((model) => model.name)).toEqual(["gpt-5.4", "gpt-5.4-mini"]);
+    expect(snapshot.periods.today.total_tokens).toBe(290);
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("input_tokens");
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("cached_input_tokens");
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("output_tokens");
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("token_breakdown");
+    expect(snapshot.models.map((model) => model.name)).toEqual(["gpt-5.4-codex", "gpt-5.4-mini"]);
   });
 
   it("prefers per-turn last_token_usage when cumulative totals diverge", async () => {
@@ -152,10 +154,11 @@ describe("Codex JSONL source", () => {
       warnings: result.warnings
     });
 
-    expect(snapshot.periods.today.input_tokens).toBe(1_500);
-    expect(snapshot.periods.today.cached_input_tokens).toBe(300);
-    expect(snapshot.periods.today.output_tokens).toBe(150);
     expect(snapshot.periods.today.total_tokens).toBe(1_650);
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("input_tokens");
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("cached_input_tokens");
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("output_tokens");
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("token_breakdown");
   });
 
   it("does not add cached input tokens to aggregate token totals", async () => {
@@ -201,10 +204,11 @@ describe("Codex JSONL source", () => {
       warnings: result.warnings
     });
 
-    expect(snapshot.periods.today.input_tokens).toBe(100_000_000);
-    expect(snapshot.periods.today.cached_input_tokens).toBe(43_400_000);
-    expect(snapshot.periods.today.output_tokens).toBe(40_000_000);
     expect(snapshot.periods.today.total_tokens).toBe(140_000_000);
     expect(snapshot.models[0]?.total_tokens).toBe(140_000_000);
+    expect(JSON.stringify(snapshot)).not.toContain("input_tokens");
+    expect(JSON.stringify(snapshot)).not.toContain("cached_input_tokens");
+    expect(JSON.stringify(snapshot)).not.toContain("output_tokens");
+    expect(JSON.stringify(snapshot)).not.toContain("token_breakdown");
   });
 });

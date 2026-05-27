@@ -6,6 +6,7 @@ import { loadConfig } from "../src/config.js";
 import {
   isSyncDue,
   installStableRunner,
+  envForService,
   refreshInstalledRunner,
   saveSyncState,
   serviceStatus,
@@ -111,6 +112,37 @@ describe("background service support", () => {
       runner_version: COLLECTOR_VERSION,
       current_version: COLLECTOR_VERSION
     });
+  });
+
+  it("includes enabled providers in service environment", () => {
+    const config = loadConfig({
+      TRMNL_TOKEN_METER_CONFIG_DIR: "/tmp/config",
+      TRMNL_TOKEN_METER_CACHE_DIR: "/tmp/cache"
+    });
+    const env = envForService(config, {
+      enabled_providers: ["codex", "opencode", "claude"]
+    });
+    expect(env.TRMNL_TOKEN_METER_ENABLED_PROVIDERS).toBe("codex,opencode,claude");
+  });
+
+  it("falls back to configured providers when no credential providers are passed", () => {
+    const config = loadConfig({
+      TRMNL_TOKEN_METER_CONFIG_DIR: "/tmp/config",
+      TRMNL_TOKEN_METER_CACHE_DIR: "/tmp/cache",
+      TRMNL_TOKEN_METER_ENABLED_PROVIDERS: "codex,opencode"
+    });
+    const env = envForService(config);
+    expect(env.TRMNL_TOKEN_METER_ENABLED_PROVIDERS).toBe("codex,opencode");
+  });
+
+  it("preserves explicit disable-all config providers for service env", () => {
+    const config = loadConfig({
+      TRMNL_TOKEN_METER_CONFIG_DIR: "/tmp/config",
+      TRMNL_TOKEN_METER_CACHE_DIR: "/tmp/cache",
+      TRMNL_TOKEN_METER_ENABLED_PROVIDERS: "none"
+    });
+    const env = envForService(config);
+    expect(env.TRMNL_TOKEN_METER_ENABLED_PROVIDERS).toBe("none");
   });
 
   it("refreshes an installed runner from the current CLI runtime", async () => {

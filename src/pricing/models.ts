@@ -1,9 +1,18 @@
 export type ModelPrice = {
   inputUsdPerMillion: number;
   cachedInputUsdPerMillion: number | null;
+  cacheCreationUsdPerMillion?: number | null;
   outputUsdPerMillion: number;
-  longContextInputMultiplier?: number;
-  longContextOutputMultiplier?: number;
+  thresholdTokens?: number;
+  thresholdMode?: "tiered" | "full-row";
+  inputUsdPerMillionAboveThreshold?: number;
+  cachedInputUsdPerMillionAboveThreshold?: number;
+  cacheCreationUsdPerMillionAboveThreshold?: number;
+  outputUsdPerMillionAboveThreshold?: number;
+  priorityInputUsdPerMillion?: number;
+  priorityCachedInputUsdPerMillion?: number | null;
+  priorityOutputUsdPerMillion?: number;
+  priorityInputTokenLimit?: number;
 };
 
 export type PricingModel = {
@@ -14,38 +23,237 @@ export type PricingModel = {
   price: ModelPrice;
 };
 
-export const pricingCatalogVersion = "2026-05-15.codexbar-parity" as const;
+export const pricingCatalogVersion = "2026-06-02.codexbar-parity" as const;
 
 export const pricingCatalog: PricingModel[] = [
+  {
+    id: "claude-haiku-4-5",
+    aliases: ["claude-haiku-4-5", "claude-haiku-4-5-20251001"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 1,
+      cachedInputUsdPerMillion: 0.1,
+      cacheCreationUsdPerMillion: 1.25,
+      outputUsdPerMillion: 5
+    }
+  },
+  {
+    id: "claude-opus-4-5",
+    aliases: ["claude-opus-4-5", "claude-opus-4-5-20251101"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 5,
+      cachedInputUsdPerMillion: 0.5,
+      cacheCreationUsdPerMillion: 6.25,
+      outputUsdPerMillion: 25
+    }
+  },
+  {
+    id: "claude-opus-4-6",
+    aliases: ["claude-opus-4-6", "claude-opus-4-6-20260205"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 5,
+      cachedInputUsdPerMillion: 0.5,
+      cacheCreationUsdPerMillion: 6.25,
+      outputUsdPerMillion: 25
+    }
+  },
+  {
+    id: "claude-opus-4-7",
+    aliases: ["claude-opus-4-7"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 5,
+      cachedInputUsdPerMillion: 0.5,
+      cacheCreationUsdPerMillion: 6.25,
+      outputUsdPerMillion: 25
+    }
+  },
+  {
+    id: "claude-opus-4-8",
+    aliases: ["claude-opus-4-8"],
+    effectiveDate: "2026-06-02",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 5,
+      cachedInputUsdPerMillion: 0.5,
+      cacheCreationUsdPerMillion: 6.25,
+      outputUsdPerMillion: 25
+    }
+  },
+  {
+    id: "claude-sonnet-4-5",
+    aliases: ["claude-sonnet-4-5", "claude-sonnet-4-5-20250929"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 3,
+      cachedInputUsdPerMillion: 0.3,
+      cacheCreationUsdPerMillion: 3.75,
+      outputUsdPerMillion: 15,
+      thresholdTokens: 200_000,
+      inputUsdPerMillionAboveThreshold: 6,
+      cachedInputUsdPerMillionAboveThreshold: 0.6,
+      cacheCreationUsdPerMillionAboveThreshold: 7.5,
+      outputUsdPerMillionAboveThreshold: 22.5
+    }
+  },
+  {
+    id: "claude-sonnet-4-6",
+    aliases: ["claude-sonnet-4-6"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 3,
+      cachedInputUsdPerMillion: 0.3,
+      cacheCreationUsdPerMillion: 3.75,
+      outputUsdPerMillion: 15,
+      thresholdTokens: 200_000,
+      inputUsdPerMillionAboveThreshold: 6,
+      cachedInputUsdPerMillionAboveThreshold: 0.6,
+      cacheCreationUsdPerMillionAboveThreshold: 7.5,
+      outputUsdPerMillionAboveThreshold: 22.5
+    }
+  },
+  {
+    id: "claude-opus-4-20250514",
+    aliases: ["claude-opus-4-20250514"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 15,
+      cachedInputUsdPerMillion: 1.5,
+      cacheCreationUsdPerMillion: 18.75,
+      outputUsdPerMillion: 75
+    }
+  },
+  {
+    id: "claude-opus-4-1",
+    aliases: ["claude-opus-4-1"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 15,
+      cachedInputUsdPerMillion: 1.5,
+      cacheCreationUsdPerMillion: 18.75,
+      outputUsdPerMillion: 75
+    }
+  },
+  {
+    id: "claude-sonnet-4-20250514",
+    aliases: ["claude-sonnet-4-20250514"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 3,
+      cachedInputUsdPerMillion: 0.3,
+      cacheCreationUsdPerMillion: 3.75,
+      outputUsdPerMillion: 15,
+      thresholdTokens: 200_000,
+      inputUsdPerMillionAboveThreshold: 6,
+      cachedInputUsdPerMillionAboveThreshold: 0.6,
+      cacheCreationUsdPerMillionAboveThreshold: 7.5,
+      outputUsdPerMillionAboveThreshold: 22.5
+    }
+  },
   {
     id: "gpt-5.5",
     aliases: ["gpt-5.5", "gpt-5.5-2026-04-23"],
     effectiveDate: "2026-05-15",
-    source: "https://openai.com/api/pricing/",
+    source: "CodexBar CostUsagePricing",
     price: {
       inputUsdPerMillion: 5,
       cachedInputUsdPerMillion: 0.5,
       outputUsdPerMillion: 30,
-      longContextInputMultiplier: 2,
-      longContextOutputMultiplier: 1.5
+      thresholdTokens: 272_000,
+      thresholdMode: "full-row",
+      inputUsdPerMillionAboveThreshold: 10,
+      cachedInputUsdPerMillionAboveThreshold: 1,
+      outputUsdPerMillionAboveThreshold: 45,
+      priorityInputUsdPerMillion: 12.5,
+      priorityCachedInputUsdPerMillion: 1.25,
+      priorityOutputUsdPerMillion: 75,
+      priorityInputTokenLimit: 272_000
+    }
+  },
+  {
+    id: "gpt-5.5-pro",
+    aliases: ["gpt-5.5-pro", "gpt-5.5-pro-2026-04-23"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 30,
+      cachedInputUsdPerMillion: null,
+      outputUsdPerMillion: 180
     }
   },
   {
     id: "gpt-5.4",
-    aliases: ["gpt-5.4", "gpt-5.4-codex"],
+    aliases: ["gpt-5.4"],
     effectiveDate: "2026-05-15",
-    source: "https://openai.com/api/pricing/",
+    source: "CodexBar CostUsagePricing",
     price: {
       inputUsdPerMillion: 2.5,
       cachedInputUsdPerMillion: 0.25,
-      outputUsdPerMillion: 15
+      outputUsdPerMillion: 15,
+      thresholdTokens: 272_000,
+      thresholdMode: "full-row",
+      inputUsdPerMillionAboveThreshold: 5,
+      cachedInputUsdPerMillionAboveThreshold: 0.5,
+      outputUsdPerMillionAboveThreshold: 22.5,
+      priorityInputUsdPerMillion: 5,
+      priorityCachedInputUsdPerMillion: 0.5,
+      priorityOutputUsdPerMillion: 30,
+      priorityInputTokenLimit: 272_000
+    }
+  },
+  {
+    id: "gpt-5.4-mini",
+    aliases: ["gpt-5.4-mini", "gpt-5.4 mini", "gpt-5.4-mini-2026-03-17"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 0.75,
+      cachedInputUsdPerMillion: 0.075,
+      outputUsdPerMillion: 4.5,
+      priorityInputUsdPerMillion: 1.5,
+      priorityCachedInputUsdPerMillion: 0.15,
+      priorityOutputUsdPerMillion: 9,
+      priorityInputTokenLimit: 272_000
+    }
+  },
+  {
+    id: "gpt-5.4-nano",
+    aliases: ["gpt-5.4-nano", "gpt-5.4 nano", "gpt-5.4-nano-2026-03-17"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 0.2,
+      cachedInputUsdPerMillion: 0.02,
+      outputUsdPerMillion: 1.25
+    }
+  },
+  {
+    id: "gpt-5.4-pro",
+    aliases: ["gpt-5.4-pro", "gpt-5.4 pro", "gpt-5.4-pro-2026-03-05"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 30,
+      cachedInputUsdPerMillion: null,
+      outputUsdPerMillion: 180
     }
   },
   {
     id: "gpt-5.3-codex",
-    aliases: ["gpt-5.3-codex", "gpt-5.3 codex", "codex-5.3", "gpt-codex-5.3"],
+    aliases: ["gpt-5.3-codex", "gpt-5.3-codex-2026-03-05"],
     effectiveDate: "2026-05-15",
-    source: "https://developers.openai.com/api/docs/models/gpt-5.3-codex",
+    source: "CodexBar CostUsagePricing",
     price: {
       inputUsdPerMillion: 1.75,
       cachedInputUsdPerMillion: 0.175,
@@ -53,21 +261,109 @@ export const pricingCatalog: PricingModel[] = [
     }
   },
   {
-    id: "gpt-5.4-mini",
-    aliases: ["gpt-5.4-mini", "gpt-5.4 mini"],
+    id: "gpt-5.3-codex-spark",
+    aliases: ["gpt-5.3-codex-spark"],
     effectiveDate: "2026-05-15",
-    source: "https://openai.com/api/pricing/",
+    source: "CodexBar CostUsagePricing",
     price: {
-      inputUsdPerMillion: 0.75,
-      cachedInputUsdPerMillion: 0.075,
-      outputUsdPerMillion: 4.5
+      inputUsdPerMillion: 0,
+      cachedInputUsdPerMillion: 0,
+      outputUsdPerMillion: 0
+    }
+  },
+  {
+    id: "gpt-5.2",
+    aliases: ["gpt-5.2"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 1.75,
+      cachedInputUsdPerMillion: 0.175,
+      outputUsdPerMillion: 14
+    }
+  },
+  {
+    id: "gpt-5.2-codex",
+    aliases: ["gpt-5.2-codex"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 1.75,
+      cachedInputUsdPerMillion: 0.175,
+      outputUsdPerMillion: 14
+    }
+  },
+  {
+    id: "gpt-5.2-pro",
+    aliases: ["gpt-5.2-pro"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 21,
+      cachedInputUsdPerMillion: null,
+      outputUsdPerMillion: 168
+    }
+  },
+  {
+    id: "gpt-5.1",
+    aliases: ["gpt-5.1"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 1.25,
+      cachedInputUsdPerMillion: 0.125,
+      outputUsdPerMillion: 10
+    }
+  },
+  {
+    id: "gpt-5.1-codex",
+    aliases: ["gpt-5.1-codex"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 1.25,
+      cachedInputUsdPerMillion: 0.125,
+      outputUsdPerMillion: 10
+    }
+  },
+  {
+    id: "gpt-5.1-codex-max",
+    aliases: ["gpt-5.1-codex-max"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 1.25,
+      cachedInputUsdPerMillion: 0.125,
+      outputUsdPerMillion: 10
+    }
+  },
+  {
+    id: "gpt-5.1-codex-mini",
+    aliases: ["gpt-5.1-codex-mini"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 0.25,
+      cachedInputUsdPerMillion: 0.025,
+      outputUsdPerMillion: 2
     }
   },
   {
     id: "gpt-5",
     aliases: ["gpt-5", "gpt-5-2025-08-07"],
     effectiveDate: "2026-05-15",
-    source: "https://openai.com/api/pricing/",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 1.25,
+      cachedInputUsdPerMillion: 0.125,
+      outputUsdPerMillion: 10
+    }
+  },
+  {
+    id: "gpt-5-codex",
+    aliases: ["gpt-5-codex"],
+    effectiveDate: "2026-05-15",
+    source: "CodexBar CostUsagePricing",
     price: {
       inputUsdPerMillion: 1.25,
       cachedInputUsdPerMillion: 0.125,
@@ -78,7 +374,7 @@ export const pricingCatalog: PricingModel[] = [
     id: "gpt-5-mini",
     aliases: ["gpt-5-mini", "gpt-5 mini"],
     effectiveDate: "2026-05-15",
-    source: "https://openai.com/api/pricing/",
+    source: "CodexBar CostUsagePricing",
     price: {
       inputUsdPerMillion: 0.25,
       cachedInputUsdPerMillion: 0.025,
@@ -89,7 +385,7 @@ export const pricingCatalog: PricingModel[] = [
     id: "gpt-5-nano",
     aliases: ["gpt-5-nano", "gpt-5 nano"],
     effectiveDate: "2026-05-15",
-    source: "https://openai.com/api/pricing/",
+    source: "CodexBar CostUsagePricing",
     price: {
       inputUsdPerMillion: 0.05,
       cachedInputUsdPerMillion: 0.005,
@@ -100,7 +396,7 @@ export const pricingCatalog: PricingModel[] = [
     id: "gpt-5-pro",
     aliases: ["gpt-5-pro", "gpt-5 pro"],
     effectiveDate: "2026-05-15",
-    source: "https://openai.com/api/pricing/",
+    source: "CodexBar CostUsagePricing",
     price: {
       inputUsdPerMillion: 15,
       cachedInputUsdPerMillion: null,
@@ -109,8 +405,50 @@ export const pricingCatalog: PricingModel[] = [
   }
 ] as const satisfies PricingModel[];
 
-const normalizeModelName = (modelName: string): string =>
-  modelName.trim().toLowerCase().replace(/\s+/g, "-");
+const normalizeBasicModelName = (modelName: string): string => {
+  let normalized = modelName.trim().toLowerCase().replace(/\s+/g, "-");
+  if (normalized.startsWith("openai/")) {
+    normalized = normalized.slice("openai/".length);
+  }
+  if (normalized.startsWith("anthropic.")) {
+    normalized = normalized.slice("anthropic.".length);
+  }
+
+  const lastDot = normalized.lastIndexOf(".");
+  if (lastDot >= 0) {
+    const tail = normalized.slice(lastDot + 1);
+    if (tail.startsWith("claude-")) normalized = tail;
+  }
+
+  normalized = normalized.replace(/-v\d+:\d+$/, "");
+  return normalized;
+};
+
+const normalizeModelName = (modelName: string): string => {
+  const normalized = normalizeBasicModelName(modelName);
+
+  const withoutCompactDate = normalized.replace(/-\d{8}$/, "");
+  if (
+    withoutCompactDate !== normalized &&
+    pricingCatalog.some((model) =>
+      model.aliases.some((alias) => normalizeBasicModelName(alias) === withoutCompactDate)
+    )
+  ) {
+    return withoutCompactDate;
+  }
+
+  const withoutDashedDate = normalized.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+  if (
+    withoutDashedDate !== normalized &&
+    pricingCatalog.some((model) =>
+      model.aliases.some((alias) => normalizeBasicModelName(alias) === withoutDashedDate)
+    )
+  ) {
+    return withoutDashedDate;
+  }
+
+  return normalized;
+};
 
 export const displayModelName = (modelName: string): string => {
   const model = findPricingModel(modelName);

@@ -1,7 +1,8 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { normalizeApiBaseUrl } from "./config.js";
 import { safeErrorMessage } from "./redact.js";
-import { DEFAULT_UPLOAD_INTERVAL_MINUTES, type AggregateSnapshot, type CollectorCredential } from "./types.js";
+import { DEFAULT_UPLOAD_INTERVAL_MINUTES, type AggregateSnapshot, type CollectorCredential, type SourceProvider } from "./types.js";
+import { parseProviders } from "./source-providers.js";
 
 const allowedTopLevelKeys = [
   "schema_version",
@@ -11,6 +12,7 @@ const allowedTopLevelKeys = [
   "periods",
   "daily",
   "models",
+  "source_summaries",
   "collector"
 ] as const;
 
@@ -20,12 +22,14 @@ export interface CollectorStatus {
   machine_status: string;
   last_received_at: string | null;
   upload_interval_minutes?: number | null;
+  enabled_providers?: SourceProvider[] | null;
 }
 
 export interface UploadResponse {
   ok: boolean;
   next_upload_after_seconds: number | null;
   server_time: string | null;
+  enabled_providers: SourceProvider[] | null;
 }
 
 export type CollectorErrorCode =
@@ -101,6 +105,15 @@ async function responseBody(response: Response): Promise<unknown> {
   } catch {
     return text;
   }
+}
+
+function parseEnabledProvidersFromResponse(body: unknown): SourceProvider[] | null {
+  if (!body || typeof body !== "object") return null;
+  const raw = (body as Record<string, unknown>).enabled_providers;
+  if (!Array.isArray(raw)) return null;
+  if (raw.length === 0) return [];
+  const parsed = parseProviders(raw, []);
+  return parsed.length > 0 ? parsed : null;
 }
 
 async function fetchWithPolicy(
@@ -196,7 +209,8 @@ export async function uploadAggregate(
     server_time:
       body && typeof body === "object" && typeof (body as Record<string, unknown>).server_time === "string"
         ? String((body as Record<string, unknown>).server_time)
-        : null
+        : null,
+    enabled_providers: parseEnabledProvidersFromResponse(body)
   };
 }
 
@@ -265,7 +279,8 @@ export async function getCollectorStatus(
     upload_interval_minutes:
       typeof body.upload_interval_minutes === "number" && Number.isFinite(body.upload_interval_minutes)
         ? Math.max(1, Math.ceil(body.upload_interval_minutes))
-        : null
+        : null,
+    enabled_providers: parseEnabledProvidersFromResponse(body)
   };
 }
 

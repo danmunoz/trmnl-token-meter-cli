@@ -1,6 +1,6 @@
 import { note } from "@clack/prompts";
 import type { ServiceStatus, SyncState } from "./service.js";
-import type { CollectorCredential } from "./types.js";
+import type { CollectorCredential, LocalUsageSourceKind, LocalUsageSourceStatus } from "./types.js";
 import type { CollectorStatus } from "./upload.js";
 
 interface StatusViewData {
@@ -10,6 +10,7 @@ interface StatusViewData {
   revoked: boolean;
   localService: ServiceStatus;
   syncState: SyncState | null;
+  sources?: LocalUsageSourceStatus[];
 }
 
 function serviceLine(status: ServiceStatus): string {
@@ -44,6 +45,29 @@ function addSection(lines: string[], title: string, rows: string[]): void {
   for (const row of rows) {
     lines.push(`  ${row}`);
   }
+}
+
+function sourceLabel(kind: LocalUsageSourceKind): string {
+  switch (kind) {
+    case "codex_sessions":
+      return "Codex sessions";
+    case "codex_archived_sessions":
+      return "Codex archived sessions";
+    case "codex_priority_sqlite":
+      return "Codex priority evidence";
+    case "pi_sessions":
+      return "Pi sessions";
+    case "opencode_sqlite":
+      return "OpenCode SQLite";
+    case "claude_projects":
+      return "Claude projects";
+  }
+}
+
+function sourceStatusLabel(source: LocalUsageSourceStatus): string {
+  if (source.status !== "read" || source.record_count === undefined) return source.status;
+  const records = source.record_count === 1 ? "record" : "records";
+  return `${source.status} (${source.record_count} ${records})`;
 }
 
 export function renderStatusSummary(
@@ -99,6 +123,14 @@ export function renderStatusSummary(
     syncRows.push("Action: run the newer CLI once to refresh the installed background runner");
   }
   addSection(lines, "Sync", syncRows);
+
+  if (data.sources && data.sources.length > 0) {
+    addSection(
+      lines,
+      "Sources",
+      data.sources.map((source) => `${sourceLabel(source.kind)}: ${sourceStatusLabel(source)}`)
+    );
+  }
 
   return lines.join("\n");
 }

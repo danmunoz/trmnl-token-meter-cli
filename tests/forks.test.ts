@@ -19,8 +19,9 @@ describe("fork-aware aggregation", () => {
       warnings: result.warnings
     });
 
-    expect(snapshot.periods.today.input_tokens).toBe(220);
-    expect(snapshot.periods.today.output_tokens).toBe(110);
+    expect(snapshot.periods.today.total_tokens).toBe(330);
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("input_tokens");
+    expect(JSON.stringify(snapshot.periods.today)).not.toContain("output_tokens");
     expect(snapshot.collector.codex_home).toBe("custom");
     expect(snapshot.collector.warnings).toContainEqual({
       code: "malformed_records_skipped",

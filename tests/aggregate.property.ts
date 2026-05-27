@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildAggregate } from "../src/aggregate.js";
+import { SUPPORTED_PROVIDERS } from "../src/source-providers.js";
 import type { UsageEvent } from "../src/types.js";
 
 describe("aggregation properties", () => {
@@ -27,10 +28,11 @@ describe("aggregation properties", () => {
       });
 
       for (const day of snapshot.daily) {
-        expect(day.input_tokens).toBeGreaterThanOrEqual(0);
-        expect(day.output_tokens).toBeGreaterThanOrEqual(0);
-        expect(day.cached_input_tokens).toBeLessThanOrEqual(day.input_tokens);
-        expect(day.total_tokens).toBe(day.input_tokens + day.output_tokens);
+        expect(day.total_tokens).toBeGreaterThanOrEqual(0);
+        expect(JSON.stringify(day)).not.toContain("input_tokens");
+        expect(JSON.stringify(day)).not.toContain("cached_input_tokens");
+        expect(JSON.stringify(day)).not.toContain("output_tokens");
+        expect(JSON.stringify(day)).not.toContain("token_breakdown");
       }
     }
   });
@@ -58,5 +60,17 @@ describe("aggregation properties", () => {
     expect(second.periods).toEqual(first.periods);
     expect(second.daily).toEqual(first.daily);
     expect(second.models).toEqual(first.models);
+  });
+
+  it("includes provider consent metadata in aggregate snapshots", () => {
+    const snapshot = buildAggregate([], {
+      machineId: "mach",
+      machineLabel: "Machine",
+      codexHomeKind: "default",
+      now: new Date("2026-05-15T12:00:00.000Z")
+    });
+    expect(snapshot.collector.supported_providers).toEqual(SUPPORTED_PROVIDERS);
+    expect(snapshot.collector.enabled_providers).toEqual(["codex"]);
+    expect(snapshot.collector.provider_statuses).toEqual([]);
   });
 });

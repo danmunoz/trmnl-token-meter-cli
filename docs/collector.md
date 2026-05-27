@@ -1,6 +1,6 @@
 # Collector
 
-The collector reads local Codex usage sources, calculates CodexBar-parity token and estimated cost aggregates, and uploads only sanitized summaries to the hosted TRMNL Token Meter backend.
+The collector reads enabled local Codex, OpenCode, and Claude usage sources, calculates token and estimated cost aggregates, and uploads only sanitized summaries to the hosted TRMNL Token Meter backend.
 
 ## Setup
 
@@ -22,6 +22,11 @@ to cron when systemd user services are unavailable.
 When you run a newer CLI release, the collector refreshes that installed runtime
 copy in place so background sync stays on the same version as the CLI you just
 launched.
+
+If the newer CLI release supports additional providers, it prints a privacy note
+for human-facing commands and points you to the TRMNL Token Meter web
+configuration page. New providers are not enabled locally by the CLI just because
+the binary supports them or because their files exist on your machine.
 
 For scripts or troubleshooting, the non-interactive pairing command remains:
 
@@ -78,7 +83,7 @@ replaces the current local pairing.
 default. Use `uninstall --revoke` or `revoke` to stop the service, revoke the
 server-side collector credential, and delete the local credential.
 
-## Custom Codex Location
+## Local Sources
 
 By default, the collector uses `CODEX_HOME` when set and otherwise `~/.codex`. To read another location, set `CODEX_HOME` for the command:
 
@@ -86,14 +91,37 @@ By default, the collector uses `CODEX_HOME` when set and otherwise `~/.codex`. T
 CODEX_HOME=/path/to/codex-home npx trmnl-token-meter collect
 ```
 
-Only expected local usage inputs are scanned:
+Only expected local usage inputs are scanned, and only for providers enabled for
+this device in the web configuration:
 
 - `$CODEX_HOME/sessions/**/*.jsonl`
 - `$CODEX_HOME/archived_sessions/**/*.jsonl`
 - `$CODEX_HOME/logs_2.sqlite` for priority-tier cost evidence
+- OpenCode SQLite database at `~/.local/share/opencode/opencode.db`
+- Claude project JSONL under `CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects`, or `~/.claude/projects` when present
 - `~/.pi/agent/sessions/**/*.jsonl` only when Pi merging is explicitly enabled
 
-The collector does not upload raw lines, prompts, responses, file paths, commands, diffs, SQL rows, Pi session content, or repository names.
+To read a specific OpenCode SQLite database:
+
+```bash
+TRMNL_TOKEN_METER_OPENCODE_DB=/path/to/opencode.db npx trmnl-token-meter collect
+```
+
+The OpenCode source reports provider `opencode` and source kind `opencode_sqlite`. It reads only normalized OpenCode `session` columns needed for model, timestamp, token totals, and stored session cost from the configured SQLite database. OpenCode costs come from `session.cost` instead of the local pricing catalog. It does not read messages, parts, titles, paths, directories, projects, account metadata, or diff storage.
+
+To read a specific Claude config or projects directory:
+
+```bash
+TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR=/path/to/claude-config npx trmnl-token-meter collect
+TRMNL_TOKEN_METER_CLAUDE_PROJECTS_HOME=/path/to/claude/projects npx trmnl-token-meter collect
+```
+
+The collector does not upload raw lines, prompts, responses, file paths, commands, diffs, SQL rows, OpenCode session content, Claude transcript content, Pi session content, or repository names.
+
+For disabled providers, the collector performs only a content-free availability
+check and uploads provider status metadata such as `available`, `missing`,
+`unreadable`, or `malformed`. That status lets the backend show source controls
+without giving the CLI consent to aggregate that provider.
 
 ## Optional Pi Session Merge
 
@@ -113,7 +141,14 @@ Disabled Pi collection is silent and does not create a missing-source warning.
 
 ## Cost Windows And Status
 
-Each collector run captures the local date once, then calculates today, last 7 days, last 30 days, and up to 31 daily rows using local-day boundaries. Cost estimates use the local CodexBar-parity catalog version included in the upload.
+Each collector run captures the local date once, then calculates today, last 7 days, last 14 days, last 30 days, and up to 15 daily rows using local-day boundaries. The upload includes combined totals plus source summaries for enabled providers found locally, currently Codex, OpenCode, and Claude. Codex and Claude cost estimates use the local catalog version included in the upload; OpenCode costs use the stored `session.cost` value.
+
+Every upload includes the CLI version, supported providers, locally enabled
+providers, and provider availability statuses. The backend response from
+`upload` or `sync --once` is the source of truth for enabled providers. If the
+web configuration enables an available provider that was not active in the
+collector, the CLI stores that response and runs one immediate follow-up sync so
+the newly enabled source can be included.
 
 Cost status meanings:
 

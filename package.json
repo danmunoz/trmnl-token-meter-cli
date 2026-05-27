@@ -1,7 +1,7 @@
 {
   "name": "trmnl-token-meter",
   "version": "0.2.3",
-  "description": "Local Codex usage collector for the TRMNL Token Meter plugin.",
+  "description": "Local AI coding usage collector for the TRMNL Token Meter plugin.",
   "private": false,
   "type": "module",
   "license": "MIT",
@@ -20,6 +20,7 @@
   "keywords": [
     "trmnl",
     "codex",
+    "opencode",
     "usage",
     "tokens",
     "cli"

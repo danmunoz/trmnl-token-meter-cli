@@ -18,14 +18,29 @@ package ships only the built `dist/` output.
 5. The CLI uploads the first sanitized snapshot, then installs a background
    scheduler using a stable local copy of the package runtime.
 6. The background scheduler runs `sync --once` on the configured interval. The
-   CLI scans local Codex usage sources, builds a sanitized aggregate, and
-   uploads only that aggregate to `POST /api/v1/usage`.
+   CLI checks supported providers for local availability without reading
+   disabled source content, scans only the providers enabled for this device by
+   the backend, builds a sanitized aggregate, and uploads only that aggregate
+   plus collector version and source availability metadata to
+   `POST /api/v1/usage`.
 7. TRMNL calls `POST /trmnl/markup`; the Worker renders the display payload from
    stored aggregate snapshots and display preferences.
 
-Raw Codex JSONL lines, prompts, responses, commands, paths, diffs, repository
-names, auth files, cookies, API keys, pairing codes, and collector bearer tokens
-are not uploaded by the collector.
+Raw session lines, prompts, responses, commands, paths, diffs, repository names,
+auth files, cookies, API keys, pairing codes, and collector bearer tokens are not
+uploaded by the collector.
+
+The upload includes combined totals plus optional `source_summaries` for enabled
+providers found locally. The supported providers are `codex`, `opencode`, and
+`claude`. Public usage sections expose total tokens and estimated cost only;
+provider-specific token lanes stay local for cost calculation. OpenCode cost
+totals use the stored `session.cost` value from the local OpenCode database.
+
+Source enablement is owned by the backend web configuration. A newer CLI release
+can report that new providers are supported and locally available, but it does
+not start aggregating those providers until the backend response includes them in
+`enabled_providers`. When that response enables a newly available provider, the
+CLI updates its local credential and performs one immediate follow-up sync.
 
 ## Local CLI
 

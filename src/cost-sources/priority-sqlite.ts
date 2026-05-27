@@ -52,6 +52,99 @@ function evidenceFromRows(rows: SqliteRow[]): PriorityTierEvidence[] {
   return evidence;
 }
 
+const valueFromPrefix = (name: string, text: string): string | null => {
+  const index = text.indexOf(`${name}=`);
+  if (index < 0) return null;
+  const tail = text.slice(index + name.length + 1);
+  const value = tail.match(/^[^\s,\])]+/)?.[0];
+  return value && value.trim() ? value : null;
+};
+
+type TraceEvidence = {
+  turnId: string;
+  tier?: "priority";
+  model?: string;
+};
+
+function jsonAfterMarker(body: string, marker: string): { prefix: string; object: Record<string, unknown> } | null {
+  const markerIndex = body.indexOf(marker);
+  if (markerIndex < 0) return null;
+
+  const prefix = body.slice(0, markerIndex);
+  const jsonText = body.slice(markerIndex + marker.length).trim();
+  try {
+    const parsed = JSON.parse(jsonText) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    return { prefix, object: parsed as Record<string, unknown> };
+  } catch {
+    return null;
+  }
+}
+
+function priorityTraceFromBody(body: string): TraceEvidence | null {
+  const parsed = jsonAfterMarker(body, "websocket request:");
+  if (!parsed) return null;
+  const request = parsed.object;
+  if (request.type !== "response.create" || request.service_tier !== "priority") return null;
+  const turnId =
+    valueFromPrefix("turn.id", parsed.prefix) ??
+    valueFromPrefix("turn_id", parsed.prefix) ??
+    stringValue(request.turn_id) ??
+    stringValue(request.turnId);
+  if (!turnId) return null;
+
+  const model = stringValue(request.model);
+  return {
+    turnId,
+    tier: "priority",
+    ...(model ? { model } : {})
+  };
+}
+
+function completedTraceFromBody(body: string): TraceEvidence | null {
+  const parsed = jsonAfterMarker(body, "websocket event:");
+  if (!parsed) return null;
+  const event = parsed.object;
+  if (event.type !== "response.completed") return null;
+  const response = event.response;
+  if (!response || typeof response !== "object") return null;
+  const model = stringValue((response as Record<string, unknown>).model);
+  const turnId = valueFromPrefix("turn.id", parsed.prefix) ?? valueFromPrefix("turn_id", parsed.prefix);
+  if (!turnId || !model) return null;
+  return { turnId, model };
+}
+
+function traceEvidenceFromRows(rows: SqliteRow[]): PriorityTierEvidence[] {
+  const byTurnId = new Map<string, TraceEvidence>();
+  for (const row of rows) {
+    const body = stringValue(row.feedback_log_body);
+    if (!body) continue;
+    const parsed = priorityTraceFromBody(body) ?? completedTraceFromBody(body);
+    if (!parsed) continue;
+    const existing = byTurnId.get(parsed.turnId);
+    const tier = parsed.tier ?? existing?.tier;
+    const model = parsed.model ?? existing?.model;
+    byTurnId.set(parsed.turnId, {
+      turnId: parsed.turnId,
+      ...(tier ? { tier } : {}),
+      ...(model ? { model } : {})
+    });
+  }
+
+  return [...byTurnId.values()].flatMap((item) =>
+    item.tier === "priority"
+      ? [
+          {
+            match_key: item.turnId,
+            tier: "priority" as const,
+            confidence: "exact" as const,
+            ...(item.model ? { model: item.model } : {})
+          }
+        ]
+      : []
+  );
+}
+
 async function readEvidenceRows(sqlitePath: string): Promise<PriorityTierEvidence[]> {
   const { DatabaseSync } = await importSqlite();
   const database = new DatabaseSync(sqlitePath, { readOnly: true });
@@ -64,6 +157,16 @@ async function readEvidenceRows(sqlitePath: string): Promise<PriorityTierEvidenc
     const evidence: PriorityTierEvidence[] = [];
     for (const table of tables) {
       const safeTable = table.replace(/"/g, "\"\"");
+      if (table === "logs") {
+        const rows = database
+          .prepare(
+            `select feedback_log_body from "${safeTable}" where feedback_log_body like '%websocket request:%' or feedback_log_body like '%response.completed%'`
+          )
+          .all();
+        evidence.push(...traceEvidenceFromRows(rows));
+        continue;
+      }
+
       const rows = database.prepare(`select * from "${safeTable}" limit 5000`).all();
       evidence.push(...evidenceFromRows(rows));
     }

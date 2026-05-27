@@ -22,10 +22,17 @@ describe("upload client", () => {
   it("serializes only aggregate allowlist fields", () => {
     const serialized = serializeAggregateForUpload({
       ...snapshot,
+      source_summaries: [],
       // @ts-expect-error deliberate extra raw field should be dropped.
       raw_prompt: "do not upload"
     });
     expect(serialized).not.toContain("raw_prompt");
+    expect(serialized).not.toContain("input_tokens");
+    expect(serialized).not.toContain("cached_input_tokens");
+    expect(serialized).not.toContain("output_tokens");
+    expect(serialized).not.toContain("cache_read_input_tokens");
+    expect(serialized).not.toContain("cache_creation_input_tokens");
+    expect(serialized).not.toContain("token_breakdown");
     expect(Object.keys(JSON.parse(serialized))).toEqual([
       "schema_version",
       "machine_id",
@@ -34,8 +41,18 @@ describe("upload client", () => {
       "periods",
       "daily",
       "models",
+      "source_summaries",
       "collector"
     ]);
+    expect(JSON.parse(serialized).periods).toHaveProperty("last_14_days");
+    expect(JSON.parse(serialized).daily).toHaveLength(15);
+    const serializedPayload = JSON.parse(serialized);
+    expect(serializedPayload.collector).toMatchObject({
+      version: serializedPayload.collector.version,
+      supported_providers: ["codex", "opencode", "claude"],
+      enabled_providers: ["codex"],
+      provider_statuses: []
+    });
   });
 
   it("uploads to the collector usage endpoint with bearer auth", async () => {
@@ -70,6 +87,97 @@ describe("upload client", () => {
         headers: expect.objectContaining({ authorization: "Bearer secret-token" })
       })
     );
+  });
+
+  it("parses enabled_providers from upload responses", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          next_upload_after_seconds: 240,
+          enabled_providers: ["codex", "opencode", "invalid"]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    await expect(
+      uploadAggregate(
+        {
+          collector_token: "secret-token",
+          api_base_url: "https://api.example.test",
+          machine_id: "mach",
+          machine_label: "Machine",
+          upload_interval_minutes: 60
+        },
+        snapshot,
+        fetchMock
+      )
+    ).resolves.toMatchObject({
+      ok: true,
+      enabled_providers: ["codex", "opencode"],
+      next_upload_after_seconds: 240
+    });
+  });
+
+  it("parses empty enabled_providers list as empty", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          next_upload_after_seconds: 120,
+          enabled_providers: []
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    await expect(
+      uploadAggregate(
+        {
+          collector_token: "secret-token",
+          api_base_url: "https://api.example.test",
+          machine_id: "mach",
+          machine_label: "Machine",
+          upload_interval_minutes: 60
+        },
+        snapshot,
+        fetchMock
+      )
+    ).resolves.toMatchObject({
+      ok: true,
+      enabled_providers: [],
+      next_upload_after_seconds: 120
+    });
+  });
+
+  it("parses invalid-only enabled_providers as null", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          enabled_providers: ["future", 42]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    await expect(
+      uploadAggregate(
+        {
+          collector_token: "secret-token",
+          api_base_url: "https://api.example.test",
+          machine_id: "mach",
+          machine_label: "Machine",
+          upload_interval_minutes: 60
+        },
+        snapshot,
+        fetchMock
+      )
+    ).resolves.toMatchObject({
+      ok: true,
+      enabled_providers: null
+    });
   });
 
   it("exchanges pairing code for credentials", async () => {

@@ -6,7 +6,8 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { CollectorConfig } from "./config.js";
-import { COLLECTOR_VERSION } from "./types.js";
+import { CONFIG_DISABLED_PROVIDERS_SENTINEL } from "./config.js";
+import { COLLECTOR_VERSION, type CollectorCredential, type SourceProvider } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 const SERVICE_LABEL = "com.trmnl.token-meter.sync";
@@ -70,13 +71,21 @@ const xmlEscape = (value: string): string =>
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
-function envForService(config: CollectorConfig): Record<string, string> {
+const normalizeProviderListForEnv = (providers: SourceProvider[]): string =>
+  providers.length > 0 ? providers.join(",") : CONFIG_DISABLED_PROVIDERS_SENTINEL;
+
+export function envForService(
+  config: CollectorConfig,
+  credential?: Pick<CollectorCredential, "enabled_providers"> | null
+): Record<string, string> {
+  const enabledProviders = credential?.enabled_providers ?? config.enabledProviders;
   return {
     CODEX_HOME: config.codexHome,
     TRMNL_TOKEN_METER_CONFIG_DIR: config.configDir,
     TRMNL_TOKEN_METER_CACHE_DIR: config.cacheDir,
     TRMNL_TOKEN_METER_INCLUDE_PI_SESSIONS: config.includePiSessions ? "1" : "0",
-    PI_HOME: config.piSessionsHome
+    PI_HOME: config.piSessionsHome,
+    TRMNL_TOKEN_METER_ENABLED_PROVIDERS: normalizeProviderListForEnv(enabledProviders)
   };
 }
 
@@ -157,8 +166,13 @@ export async function installStableRunner(
   return runner;
 }
 
-function launchdPlist(config: CollectorConfig, runner: string, intervalMinutes: number): string {
-  const env = envForService(config);
+function launchdPlist(
+  config: CollectorConfig,
+  runner: string,
+  intervalMinutes: number,
+  credential?: Pick<CollectorCredential, "enabled_providers"> | null
+): string {
+  const env = envForService(config, credential);
   const envXml = Object.entries(env)
     .map(
       ([key, value]) =>
@@ -195,8 +209,12 @@ ${envXml}
 `;
 }
 
-function systemdService(config: CollectorConfig, runner: string): string {
-  const env = Object.entries(envForService(config))
+function systemdService(
+  config: CollectorConfig,
+  runner: string,
+  credential?: Pick<CollectorCredential, "enabled_providers"> | null
+): string {
+  const env = Object.entries(envForService(config, credential))
     .map(([key, value]) => `Environment="${key}=${value.replaceAll('"', '\\"')}"`)
     .join("\n");
   return `[Unit]
@@ -227,11 +245,14 @@ async function installLaunchd(
   config: CollectorConfig,
   runner: string,
   intervalMinutes: number,
-  runCommand: CommandRunner
+  runCommand: CommandRunner,
+  credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): Promise<void> {
   const plistPath = join(homedir(), "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`);
   await mkdir(dirname(plistPath), { recursive: true });
-  await writeFile(plistPath, launchdPlist(config, runner, intervalMinutes), { mode: 0o600 });
+  await writeFile(plistPath, launchdPlist(config, runner, intervalMinutes, credential), {
+    mode: 0o600
+  });
   const target = `gui/${process.getuid?.() ?? ""}`;
   await runCommand("launchctl", ["bootout", target, plistPath]).catch(() => undefined);
   await runCommand("launchctl", ["bootstrap", target, plistPath]);
@@ -241,13 +262,16 @@ async function installSystemd(
   config: CollectorConfig,
   runner: string,
   intervalMinutes: number,
-  runCommand: CommandRunner
+  runCommand: CommandRunner,
+  credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): Promise<void> {
   const userDir = join(homedir(), ".config", "systemd", "user");
   await mkdir(userDir, { recursive: true });
-  await writeFile(join(userDir, "trmnl-token-meter.service"), systemdService(config, runner), {
-    mode: 0o600
-  });
+  await writeFile(
+    join(userDir, "trmnl-token-meter.service"),
+    systemdService(config, runner, credential),
+    { mode: 0o600 }
+  );
   await writeFile(join(userDir, "trmnl-token-meter.timer"), systemdTimer(intervalMinutes), {
     mode: 0o600
   });
@@ -259,14 +283,17 @@ async function installCron(
   config: CollectorConfig,
   runner: string,
   intervalMinutes: number,
-  runCommand: CommandRunner
+  runCommand: CommandRunner,
+  credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): Promise<void> {
   const existing = await execFileAsync("crontab", ["-l"]).then(
     (result) => String(result.stdout),
     () => ""
   );
   const command = [
-    ...Object.entries(envForService(config)).map(([key, value]) => `${key}=${shellQuote(value)}`),
+    ...Object.entries(envForService(config, credential)).map(
+      ([key, value]) => `${key}=${shellQuote(value)}`
+    ),
     shellQuote(process.execPath),
     shellQuote(runner),
     "sync",
@@ -293,24 +320,28 @@ async function writeServiceMetadata(config: CollectorConfig, metadata: ServiceMe
 export async function installBackgroundService(
   config: CollectorConfig,
   intervalMinutes: number,
-  options: { sourceDir?: string; runCommand?: CommandRunner } = {}
+  options: {
+    credential?: Pick<CollectorCredential, "enabled_providers"> | null;
+    sourceDir?: string;
+    runCommand?: CommandRunner;
+  } = {}
 ): Promise<ServiceMetadata> {
   const runCommand = options.runCommand ?? defaultCommandRunner;
   const runner = await installStableRunner(config, options.sourceDir);
   let method: ServiceMetadata["method"];
   if (platform() === "darwin") {
-    await installLaunchd(config, runner, intervalMinutes, runCommand);
+    await installLaunchd(config, runner, intervalMinutes, runCommand, options.credential);
     method = "launchd";
   } else if (platform() === "linux") {
     try {
-      await installSystemd(config, runner, intervalMinutes, runCommand);
+      await installSystemd(config, runner, intervalMinutes, runCommand, options.credential);
       method = "systemd";
     } catch {
-      await installCron(config, runner, intervalMinutes, runCommand);
+      await installCron(config, runner, intervalMinutes, runCommand, options.credential);
       method = "cron";
     }
   } else {
-    await installCron(config, runner, intervalMinutes, runCommand);
+    await installCron(config, runner, intervalMinutes, runCommand, options.credential);
     method = "cron";
   }
 
