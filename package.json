@@ -43,7 +43,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup --config tsup.config.ts",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "dev": "tsx src/cli.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

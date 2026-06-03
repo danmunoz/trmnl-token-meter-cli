@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -10,7 +10,28 @@ const execFileAsync = promisify(execFile);
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const binName = process.platform === "win32" ? "trmnl-token-meter.cmd" : "trmnl-token-meter";
 
+async function listJsFiles(root) {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listJsFiles(path)));
+      continue;
+    }
+    if (entry.isFile() && path.endsWith(".js")) {
+      files.push(path);
+    }
+  }
+  return files;
+}
+
 async function main() {
+  await execFileAsync("pnpm", ["build"], {
+    cwd: repoRoot,
+    env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" }
+  });
+
   const { stdout } = await execFileAsync("npm", ["pack", "--json", "--ignore-scripts"], {
     cwd: repoRoot,
     env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" }
@@ -46,6 +67,14 @@ async function main() {
       throw new Error(
         `packed CLI version mismatch: CLI reported ${cliVersion}, package.json reported ${String(installedPackage.version)}`
       );
+    }
+
+    const packedDistRoot = join(sandbox, "node_modules", "trmnl-token-meter", "dist");
+    for (const file of await listJsFiles(packedDistRoot)) {
+      const contents = await readFile(file, "utf8");
+      if (contents.includes('import("sqlite")')) {
+        throw new Error(`packed CLI rewrote node:sqlite to a bare sqlite import in ${file}`);
+      }
     }
 
     const serviceSandbox = join(sandbox, "service-runner");
