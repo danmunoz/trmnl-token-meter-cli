@@ -8,7 +8,9 @@ import {
   ensureCollectorDirs,
   loadConfig,
   loadCredential,
+  loadSourceNoticeState,
   saveCredential,
+  saveSourceNoticeState,
   type CollectorConfig
 } from "./config.js";
 import { scanLocalCostSources } from "./cost-scan.js";
@@ -30,8 +32,43 @@ import {
   serviceStatus,
   uninstallBackgroundService
 } from "./service.js";
-import { COLLECTOR_VERSION, DEFAULT_UPLOAD_INTERVAL_MINUTES, type AggregateSnapshot } from "./types.js";
+import {
+  COLLECTOR_VERSION,
+  DEFAULT_UPLOAD_INTERVAL_MINUTES,
+  type AggregateSnapshot,
+  type CollectorCredential,
+  type ProviderStatus
+} from "./types.js";
 import { updateNotice } from "./update-check.js";
+import type { SourceProvider } from "./types.js";
+import { parseProviders, providerLabels, SUPPORTED_PROVIDERS } from "./source-providers.js";
+
+const resolveEnabledProviders = (
+  credential: { enabled_providers?: SourceProvider[] } | null | undefined,
+  config: { enabledProviders: SourceProvider[] }
+): SourceProvider[] => {
+  if (Array.isArray(credential?.enabled_providers)) {
+    return parseProviders(credential.enabled_providers, []);
+  }
+  return [...config.enabledProviders];
+};
+
+function buildProviderNotice(unknownProviders: SourceProvider[]): string {
+  const names = unknownProviders.map((provider) => providerLabels[provider]);
+  return (
+    `New local sources are supported: ${names.join(", ")}.\n` +
+    "They are not collected until enabled in the TRMNL Token Meter web config.\n" +
+    "Raw prompts, responses, commands, paths, OpenCode messages, and Claude transcripts stay on this machine."
+  );
+}
+
+const shouldShowProviderNotice = (command: string, args: string[]): boolean => {
+  if (command === "collect") return false;
+  if (command === "sync" && (hasFlag(args, "--once") || hasFlag(args, "--due"))) return false;
+  if (command === "run") return false;
+  if (command === "service") return false;
+  return true;
+};
 
 function argValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -61,6 +98,21 @@ async function maybePrintUpdateNotice(config: CollectorConfig, argv: string[]): 
   if (notice) process.stderr.write(`${notice}\n`);
 }
 
+async function maybePrintSourceNotice(
+  config: CollectorConfig,
+  command: string,
+  args: string[]
+): Promise<void> {
+  if (!shouldShowProviderNotice(command, args)) return;
+  const state = await loadSourceNoticeState(config);
+  const known = new Set(state.known_supported_providers);
+  const missingProviders = SUPPORTED_PROVIDERS.filter((provider) => !known.has(provider));
+  if (missingProviders.length === 0) return;
+  const updated = { known_supported_providers: SUPPORTED_PROVIDERS };
+  await saveSourceNoticeState(config, updated);
+  process.stderr.write(`${buildProviderNotice(missingProviders)}\n`);
+}
+
 function printHelp(): void {
   process.stdout.write(`TRMNL Token Meter
 
@@ -81,16 +133,28 @@ Existing commands:
 `);
 }
 
-async function collectSnapshot(config: CollectorConfig): Promise<AggregateSnapshot> {
+async function collectSnapshot(
+  config: CollectorConfig,
+  options: { enabledProviders?: SourceProvider[] } = {}
+): Promise<{ snapshot: AggregateSnapshot; providerStatuses: ProviderStatus[] }> {
   const credential = await loadCredential(config.credentialPath);
-  const scan = await scanLocalCostSources(config);
-  return buildAggregate(scan.records, {
-    machineId: credential?.machine_id ?? "unpaired",
-    machineLabel: credential?.machine_label ?? hostname(),
-    codexHomeKind: config.codexHomeKind,
-    warnings: scan.warnings,
-    sources: scan.sources
+  const scanProviders = options.enabledProviders ?? resolveEnabledProviders(credential, config);
+  const scan = await scanLocalCostSources(config, {
+    enabledProviders: scanProviders
   });
+  return {
+    snapshot: buildAggregate(scan.records, {
+      machineId: credential?.machine_id ?? "unpaired",
+      machineLabel: credential?.machine_label ?? hostname(),
+      codexHomeKind: config.codexHomeKind,
+    warnings: scan.warnings,
+    sources: scan.sources,
+    supportedProviders: SUPPORTED_PROVIDERS,
+    enabledProviders: scanProviders,
+    providerStatuses: scan.providerStatuses
+  }),
+    providerStatuses: scan.providerStatuses,
+  };
 }
 
 async function pairCommand(args: string[], config: CollectorConfig): Promise<void> {
@@ -119,8 +183,8 @@ async function pairCommand(args: string[], config: CollectorConfig): Promise<voi
 }
 
 async function collectCommand(config: CollectorConfig): Promise<void> {
-  const snapshot = await collectSnapshot(config);
-  process.stdout.write(`${serializeAggregateForUpload(snapshot)}\n`);
+  const result = await collectSnapshot(config);
+  process.stdout.write(`${serializeAggregateForUpload(result.snapshot)}\n`);
 }
 
 async function uploadCommand(config: CollectorConfig): Promise<void> {
@@ -128,11 +192,17 @@ async function uploadCommand(config: CollectorConfig): Promise<void> {
   process.stdout.write("Upload complete\n");
 }
 
+function sameEnabledProviders(left: readonly SourceProvider[], right: readonly SourceProvider[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((provider) => rightSet.has(provider));
+}
+
 async function applyUploadInterval(
   config: CollectorConfig,
-  credential: NonNullable<Awaited<ReturnType<typeof loadCredential>>>,
+  credential: CollectorCredential,
   intervalMinutes: number | null | undefined
-): Promise<typeof credential> {
+): Promise<CollectorCredential> {
   if (!Number.isFinite(intervalMinutes) || !intervalMinutes || intervalMinutes < 1) return credential;
   const normalized = Math.max(1, Math.ceil(intervalMinutes));
   if (credential.upload_interval_minutes === normalized) return credential;
@@ -143,7 +213,7 @@ async function applyUploadInterval(
   try {
     const localService = await serviceStatus(config);
     if (localService.installed) {
-      await installBackgroundService(config, normalized);
+      await installBackgroundService(config, normalized, { credential });
     }
   } catch (error) {
     process.stderr.write(
@@ -154,24 +224,60 @@ async function applyUploadInterval(
   return nextCredential;
 }
 
-async function uploadOnce(config: CollectorConfig): Promise<void> {
+async function uploadOnce(
+  config: CollectorConfig,
+  options: { allowProviderReconcile?: boolean } = {}
+): Promise<void> {
+  const allowProviderReconcile = options.allowProviderReconcile ?? true;
   const credential = await loadCredential(config.credentialPath);
   if (!credential) throw new Error("Collector is not paired. Run pair first.");
-  const snapshot = await collectSnapshot(config);
+  const currentProviders = resolveEnabledProviders(credential, config);
+  const { snapshot, providerStatuses } = await collectSnapshot(config, {
+    enabledProviders: currentProviders
+  });
+
   try {
     const response = await uploadAggregate(credential, snapshot);
-    await applyUploadInterval(
-      config,
-      credential,
-      response.next_upload_after_seconds ? response.next_upload_after_seconds / 60 : null
-    );
+    let nextCredential = { ...credential };
+    const nextUploadInterval = response.next_upload_after_seconds
+      ? response.next_upload_after_seconds / 60
+      : null;
+    if (nextUploadInterval !== null) {
+      nextCredential = await applyUploadInterval(
+        config,
+        nextCredential,
+        response.next_upload_after_seconds ? response.next_upload_after_seconds / 60 : null
+      );
+    }
+
+    if (
+      allowProviderReconcile &&
+      response.enabled_providers !== null &&
+      !sameEnabledProviders(response.enabled_providers, currentProviders)
+    ) {
+      nextCredential.enabled_providers = response.enabled_providers;
+      await saveCredential(config.credentialPath, nextCredential);
+    }
+
     await saveSyncState(config, { last_status: "success" });
+
+    const newlyEnabled = response.enabled_providers?.filter((provider) => !currentProviders.includes(provider)) ?? [];
+    const canUploadAgain =
+      allowProviderReconcile &&
+      newlyEnabled.length > 0 &&
+      newlyEnabled.some((provider) =>
+        providerStatuses.some((status) => status.provider === provider && status.status === "available")
+      );
+    if (canUploadAgain) {
+      await uploadOnce(config, { allowProviderReconcile: false });
+    }
   } catch (error) {
     if (isCollectorApiError(error, "collector_revoked")) {
       await saveSyncState(config, { last_status: "error", last_error: "collector_revoked" });
       await uninstallBackgroundService(config, { removeRunner: true }).catch(() => undefined);
       throw new Error(
-        "This meter was revoked on the server. Background sync was stopped. Run `trmnl-token-meter add` to pair again."
+        "This meter was revoked on the server. Background sync was stopped. Run `trmnl-token-meter add` to pair again.",
+        { cause: error }
       );
     }
     await saveSyncState(config, { last_status: "error", last_error: safeErrorMessage(error) });
@@ -227,10 +333,11 @@ function formatDate(value: string | null | undefined): string {
 
 async function statusCommand(config: CollectorConfig): Promise<void> {
   const { printStatusSummary } = await import("./status-ui.js");
-  let [credential, localService, syncState] = await Promise.all([
-    loadCredential(config.credentialPath),
-    serviceStatus(config),
-    readSyncState(config)
+  let credential = await loadCredential(config.credentialPath);
+  let localService = await serviceStatus(config);
+  const [syncState, localScan] = await Promise.all([
+    readSyncState(config),
+    scanLocalCostSources(config, { enabledProviders: resolveEnabledProviders(credential, config) })
   ]);
 
   let remoteStatus = null;
@@ -263,7 +370,8 @@ async function statusCommand(config: CollectorConfig): Promise<void> {
             ...syncState,
             ...(syncState.last_error ? { last_error: safeErrorMessage(syncState.last_error) } : {})
           }
-        : null
+        : null,
+      sources: localScan.sources
     },
     formatDate
   );
@@ -272,7 +380,9 @@ async function statusCommand(config: CollectorConfig): Promise<void> {
 async function installServiceCommand(config: CollectorConfig): Promise<void> {
   const credential = await loadCredential(config.credentialPath);
   if (!credential) throw new Error("Collector is not paired. Run setup first.");
-  const metadata = await installBackgroundService(config, credential.upload_interval_minutes);
+  const metadata = await installBackgroundService(config, credential.upload_interval_minutes, {
+    credential
+  });
   process.stdout.write(
     `Background sync installed with ${metadata.method}; uploads run every ${metadata.interval_minutes} minutes.\n`
   );
@@ -368,7 +478,7 @@ async function setupCommand(args: string[], config: CollectorConfig): Promise<vo
 
   process.stdout.write(`TRMNL Token Meter
 
-This will sync sanitized Codex usage totals to your TRMNL display.
+This will sync sanitized AI coding usage totals to your TRMNL display.
 Raw prompts, responses, commands, file paths, and diffs stay on this machine.
 After setup, uploads will continue automatically in the background.
 
@@ -388,7 +498,9 @@ After setup, uploads will continue automatically in the background.
     await uploadOnce(config);
 
     process.stdout.write("Installing background sync...\n");
-    const metadata = await installBackgroundService(config, credential.upload_interval_minutes);
+    const metadata = await installBackgroundService(config, credential.upload_interval_minutes, {
+      credential
+    });
 
     if (existing) {
       try {
@@ -406,7 +518,9 @@ You can close this terminal.
     if (existing) {
       await saveCredential(config.credentialPath, existing).catch(() => undefined);
       if (previousService?.installed) {
-        await installBackgroundService(config, existing.upload_interval_minutes).catch(() => undefined);
+        await installBackgroundService(config, existing.upload_interval_minutes, {
+          credential: existing
+        }).catch(() => undefined);
       }
     } else {
       await deleteCredential(config.credentialPath).catch(() => undefined);
@@ -467,6 +581,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     process.stderr.write(`Warning: could not refresh the background runner: ${safeErrorMessage(error)}\n`);
   });
   if (shouldCheckForUpdates(command, argv)) await maybePrintUpdateNotice(config, argv);
+  await maybePrintSourceNotice(config, command, args);
 
   if (argv.length === 0 || command === "menu") return menuCommand(config);
   if (command === "setup" || command === "add") return setupCommand(args, config);

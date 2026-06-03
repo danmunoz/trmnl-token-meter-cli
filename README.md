@@ -4,11 +4,11 @@
   <img src="./docs/assets/trmnl-token-meter-preview.png" alt="TRMNL Token Meter display preview" width="800" />
 </p>
 
-TRMNL Token Meter is a local collector for showing Codex token usage on a TRMNL display.
+TRMNL Token Meter is a local collector for showing AI coding token usage on a TRMNL display.
 
-The CLI runs on your computer, reads local Codex usage records, calculates aggregate token and estimated cost totals, and syncs those totals to your TRMNL Token Meter plugin. It is meant for people who want a private, glanceable meter for how much Codex usage is happening today, this week, and this month.
+The CLI runs on your computer, reads enabled local Codex, OpenCode, and Claude usage records, calculates aggregate token and estimated cost totals, and syncs those totals to your TRMNL Token Meter plugin. It is meant for people who want a private, glanceable meter for how much AI coding usage is happening today, this week, and this month.
 
-Privacy is the core design constraint: raw Codex usage content stays on your machine. The CLI does not upload prompts, responses, commands, diffs, file contents, repository names, or file paths. It sends only aggregate totals and status fields needed to render the TRMNL display.
+Privacy is the core design constraint: raw usage content stays on your machine. The CLI does not upload prompts, responses, commands, diffs, file contents, repository names, or file paths. It sends only aggregate totals and status fields needed to render the TRMNL display.
 
 ## Compatibility
 
@@ -19,11 +19,15 @@ The package manifest enforces the OS restriction at install time.
 
 ## How It Works
 
-1. The CLI scans local Codex usage files on your machine.
-2. It converts those records into daily, rolling-window, and per-model aggregates.
-3. It uploads only the sanitized aggregate snapshot needed by the TRMNL Token Meter backend.
+1. The CLI checks which supported sources are available locally without reading usage content from sources that are not enabled.
+2. It scans only the sources enabled for this device in the TRMNL Token Meter web configuration.
+3. It converts those records into daily, rolling-window, and per-model aggregates.
+4. It uploads only the sanitized aggregate snapshot, collector version, source availability, and enabled-source list needed by the TRMNL Token Meter backend.
 
-The collector is designed to be useful without becoming another remote analytics pipe. Raw Codex session content stays local.
+The collector is designed to be useful without becoming another remote analytics pipe. Raw session content stays local.
+Newly supported providers do not start syncing automatically. When a newer CLI
+release detects additional supported providers, it prints a privacy note and
+points you to the web configuration page to enable them.
 
 ## Quick Start
 
@@ -60,13 +64,13 @@ trmnl-token-meter --version
 
 ## What Gets Sent
 
-Each upload sends a sanitized aggregate snapshot. The CLI computes this locally before upload. Individual usage records are not sent; only aggregate data, totals, and generic status fields are sent.
+Each upload sends a sanitized aggregate snapshot. The CLI computes this locally before upload. Individual usage records are not sent; only aggregate data, total tokens, estimated costs, and generic status fields are sent. Token mix fields such as input, output, cache read, and cache creation stay local.
 
 Compact representative example:
 
 ```json
 {
-  "schema_version": "2026-05-15.v2-codexbar-cost",
+  "schema_version": "2026-05-28.v4-14day-window",
   "machine_id": "mach_abc123",
   "machine_label": "My MacBook",
   "generated_at": "2026-05-18T12:42:57.320Z",
@@ -74,37 +78,37 @@ Compact representative example:
     "today": {
       "start": "2026-05-18",
       "end": "2026-05-19",
-      "input_tokens": 120000,
-      "cached_input_tokens": 30000,
-      "output_tokens": 42000,
       "total_tokens": 162000,
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-05-15.codexbar-parity",
+      "pricing_catalog_version": "2026-06-02.codexbar-parity",
       "warning_codes": []
     },
     "last_7_days": {
       "start": "2026-05-12",
       "end": "2026-05-19",
-      "input_tokens": 500000,
-      "cached_input_tokens": 130000,
-      "output_tokens": 180000,
       "total_tokens": 680000,
       "estimated_cost_usd": 5.4321,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-05-15.codexbar-parity",
+      "pricing_catalog_version": "2026-06-02.codexbar-parity",
+      "warning_codes": []
+    },
+    "last_14_days": {
+      "start": "2026-05-05",
+      "end": "2026-05-19",
+      "total_tokens": 1040000,
+      "estimated_cost_usd": 8.7654,
+      "cost_status": "known",
+      "pricing_catalog_version": "2026-06-02.codexbar-parity",
       "warning_codes": []
     },
     "last_30_days": {
       "start": "2026-04-19",
       "end": "2026-05-19",
-      "input_tokens": 1500000,
-      "cached_input_tokens": 410000,
-      "output_tokens": 620000,
       "total_tokens": 2120000,
       "estimated_cost_usd": 16.789,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-05-15.codexbar-parity",
+      "pricing_catalog_version": "2026-06-02.codexbar-parity",
       "warning_codes": []
     }
   },
@@ -113,13 +117,10 @@ Compact representative example:
       "date": "2026-05-18",
       "start": "2026-05-18",
       "end": "2026-05-19",
-      "input_tokens": 120000,
-      "cached_input_tokens": 30000,
-      "output_tokens": 42000,
       "total_tokens": 162000,
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-05-15.codexbar-parity",
+      "pricing_catalog_version": "2026-06-02.codexbar-parity",
       "warning_codes": [],
       "has_usage": true,
       "is_missing": false
@@ -128,21 +129,33 @@ Compact representative example:
   "models": [
     {
       "name": "gpt-5",
-      "input_tokens": 100000,
-      "cached_input_tokens": 25000,
-      "output_tokens": 36000,
       "total_tokens": 136000,
       "estimated_cost_usd": 1.01,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-05-15.codexbar-parity",
+      "pricing_catalog_version": "2026-06-02.codexbar-parity",
       "warning_codes": []
+    }
+  ],
+  "source_summaries": [
+    {
+      "provider": "codex",
+      "periods": { "...": "same aggregate period shape as top-level periods" },
+      "daily": [{ "...": "same daily aggregate shape" }],
+      "models": [{ "...": "same model aggregate shape" }]
     }
   ],
   "collector": {
     "version": "0.1.0",
     "source": "codexbar-local-cost",
     "codex_home": "default",
-    "cost_engine_version": "2026-05-15.codexbar-parity",
+    "cost_engine_version": "2026-06-02.codexbar-parity",
+    "supported_providers": ["codex", "opencode", "claude"],
+    "enabled_providers": ["codex"],
+    "provider_statuses": [
+      { "provider": "codex", "status": "available" },
+      { "provider": "opencode", "status": "available" },
+      { "provider": "claude", "status": "missing" }
+    ],
     "sources": [
       {
         "kind": "codex_sessions",
@@ -156,7 +169,11 @@ Compact representative example:
 }
 ```
 
-The real upload can include up to 31 daily rows and up to 25 normalized model rows. It does not include raw session records or anything needed to reconstruct your Codex conversations.
+The real upload can include up to 15 daily rows, up to 25 normalized model rows,
+and optional source summaries for sources enabled in the web configuration.
+Source availability is reported separately so the backend can show enablement
+controls without requiring the CLI to read disabled source contents. It does not
+include raw session records or anything needed to reconstruct your conversations.
 
 ## What Never Gets Sent
 
@@ -170,11 +187,13 @@ The CLI does not upload:
 - Absolute paths
 - Repository names
 - Raw Codex JSONL lines
+- Raw OpenCode SQLite rows or session content
+- Raw Claude project transcripts
 - Priority database rows
 - Pi session contents
 - Auth files, browser cookies, API keys, TRMNL secrets, pairing codes, or collector tokens in aggregate uploads
 
-No individual usage data is sent. No raw usage content is analyzed remotely. The private parts of your Codex activity stay local.
+No individual usage data is sent. No raw usage content is analyzed remotely. The private parts of your AI coding activity stay local.
 
 ## Commands
 
@@ -283,13 +302,15 @@ Use `collect` to print the exact sanitized payload locally without uploading:
 npx trmnl-token-meter collect
 ```
 
-This is the best way to verify what would be sent. The output is the aggregate snapshot, not raw Codex content.
+This is the best way to verify what would be sent. The output is the aggregate snapshot, not raw session content.
 
 ## Local Configuration
 
 The collector stores credentials, service metadata, and sync state locally on your machine.
 
 - `CODEX_HOME` controls where Codex usage files are read from. Default: `~/.codex`
+- `TRMNL_TOKEN_METER_OPENCODE_DB` points to a specific OpenCode SQLite database. Default: `~/.local/share/opencode/opencode.db`
+- `TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR` or `TRMNL_TOKEN_METER_CLAUDE_PROJECTS_HOME` points to a Claude config or projects directory when auto-detection is not enough
 - `TRMNL_TOKEN_METER_API_BASE_URL` overrides the backend URL
 - `TRMNL_TOKEN_METER_CONFIG_DIR` overrides the config directory
 - `TRMNL_TOKEN_METER_CACHE_DIR` overrides the cache directory
@@ -332,19 +353,36 @@ This project is released under the [MIT License](./LICENSE).
 
 ## Local Sources
 
-By default, the CLI reads Codex usage from `CODEX_HOME` when set, otherwise `~/.codex`.
+By default, the CLI reads Codex usage from `CODEX_HOME` when set, otherwise `~/.codex`. It also reads OpenCode usage from `~/.local/share/opencode/opencode.db` and scans Claude project transcripts when they exist.
 
 Expected local inputs:
 
 - `$CODEX_HOME/sessions/**/*.jsonl`
 - `$CODEX_HOME/archived_sessions/**/*.jsonl`
 - `$CODEX_HOME/logs_2.sqlite` for priority-tier cost evidence
+- OpenCode SQLite database at `~/.local/share/opencode/opencode.db`
+- Claude project JSONL under `CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects`, or `~/.claude/projects` when present
 - `~/.pi/agent/sessions/**/*.jsonl` only when Pi session merging is explicitly enabled
 
 To read another Codex directory:
 
 ```bash
 CODEX_HOME=/path/to/codex-home npx trmnl-token-meter collect
+```
+
+To read a specific OpenCode SQLite database:
+
+```bash
+TRMNL_TOKEN_METER_OPENCODE_DB=/path/to/opencode.db npx trmnl-token-meter collect
+```
+
+The OpenCode source reports provider `opencode` and source kind `opencode_sqlite`. The collector reads only normalized `session` columns needed for model, timestamp, token totals, and stored session cost; OpenCode costs come from `session.cost` instead of the local pricing catalog. It does not read OpenCode messages, parts, titles, paths, directories, projects, account metadata, or diff storage.
+
+To read a specific Claude config or projects directory:
+
+```bash
+TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR=/path/to/claude-config npx trmnl-token-meter collect
+TRMNL_TOKEN_METER_CLAUDE_PROJECTS_HOME=/path/to/claude/projects npx trmnl-token-meter collect
 ```
 
 Pi session merging is off by default. Enable it for one command with:

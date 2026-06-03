@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
   estimateUsageCost,
   normalizeEstimateModelName,
-  priorityTokens,
   pricingCatalogVersion
 } from "./pricing/index.js";
 import { applyForkLedger, forkWarnings } from "./forks.js";
@@ -17,13 +16,16 @@ import {
   type DailyUsage,
   type LocalUsageSourceStatus,
   type ModelUsage,
+  type ProviderStatus,
   type SessionUsageRecord,
-  type TokenUsage,
+  type SourceProvider,
+  type SourceSummary,
   type UsageEvent,
   type UsagePeriod,
   type WarningCode
 } from "./types.js";
 import { mergeWarnings, warning, warningCodes } from "./warnings.js";
+import { SUPPORTED_PROVIDERS } from "./source-providers.js";
 
 export interface AggregateOptions {
   machineId: string;
@@ -33,6 +35,9 @@ export interface AggregateOptions {
   warnings?: CollectorWarning[];
   sources?: LocalUsageSourceStatus[];
   showCost?: boolean;
+  supportedProviders?: SourceProvider[];
+  enabledProviders?: SourceProvider[];
+  providerStatuses?: ProviderStatus[];
 }
 
 const addDays = (date: string, days: number): string => nextLocalDate(date, days);
@@ -56,9 +61,6 @@ const toLocalRecords = (
 const emptyPeriod = (start: string, end: string, costStatus: CostStatus): UsagePeriod => ({
   start,
   end,
-  input_tokens: 0,
-  cached_input_tokens: 0,
-  output_tokens: 0,
   total_tokens: 0,
   estimated_cost_usd: costStatus === "known" ? 0 : null,
   cost_status: costStatus,
@@ -66,20 +68,26 @@ const emptyPeriod = (start: string, end: string, costStatus: CostStatus): UsageP
   warning_codes: []
 });
 
-const addUsage = (target: TokenUsage, record: TokenUsage): void => {
-  target.input_tokens += Math.max(0, Math.floor(record.input_tokens));
-  target.cached_input_tokens += Math.max(
-    0,
-    Math.min(Math.floor(record.cached_input_tokens), Math.floor(record.input_tokens))
-  );
-  target.output_tokens += Math.max(0, Math.floor(record.output_tokens));
+const positiveInt = (value: number | undefined): number =>
+  Number.isFinite(value) ? Math.max(0, Math.floor(value ?? 0)) : 0;
+
+const totalTokensForRecord = (record: SessionUsageRecord): number => {
+  if (
+    record.cache_creation_input_tokens !== undefined ||
+    record.cache_read_input_tokens !== undefined
+  ) {
+    return (
+      positiveInt(record.input_tokens) +
+      positiveInt(record.cache_creation_input_tokens) +
+      positiveInt(record.cache_read_input_tokens) +
+      positiveInt(record.output_tokens)
+    );
+  }
+  return positiveInt(record.input_tokens) + positiveInt(record.output_tokens);
 };
 
-const withTotals = <T extends TokenUsage & { total_tokens: number }>(value: T): T => ({
-  ...value,
-  cached_input_tokens: Math.min(value.cached_input_tokens, value.input_tokens),
-  total_tokens: value.input_tokens + value.output_tokens
-});
+const totalTokensForRecords = (records: readonly SessionUsageRecord[]): number =>
+  records.reduce((total, record) => total + totalTokensForRecord(record), 0);
 
 const sanitizeModelName = (name: string): string => {
   const normalized = normalizeEstimateModelName(name);
@@ -91,7 +99,15 @@ const sanitizeModelName = (name: string): string => {
 
 const recordWarningCodes = (records: readonly SessionUsageRecord[]): WarningCode[] => {
   const codes = new Set<WarningCode>();
-  if (records.some((record) => !record.pricing_known || sanitizeModelName(record.model) === "unknown")) {
+  if (
+    records.some(
+      (record) =>
+        record.observed_cost_usd === undefined &&
+        (record.source_provider === "opencode" ||
+          !record.pricing_known ||
+          sanitizeModelName(record.model) === "unknown")
+    )
+  ) {
     codes.add("unknown_pricing");
   }
   if (records.some((record) => record.long_context === "unknown")) {
@@ -107,21 +123,71 @@ const estimateRecords = (
   records: readonly SessionUsageRecord[],
   showCost: boolean
 ): Pick<UsagePeriod, "estimated_cost_usd" | "cost_status" | "pricing_catalog_version"> => {
+  if (!showCost) {
+    return {
+      estimated_cost_usd: null,
+      cost_status: "disabled",
+      pricing_catalog_version: pricingCatalogVersion
+    };
+  }
+
+  const observedCost = records.reduce(
+    (total, record) => total + (record.observed_cost_usd ?? 0),
+    0
+  );
+  const observedCostCount = records.filter((record) => record.observed_cost_usd !== undefined).length;
+  const recordsWithoutObservedCost = records.filter((record) => record.observed_cost_usd === undefined);
+  const unpricedOpenCodeRecords = recordsWithoutObservedCost.filter(
+    (record) => record.source_provider === "opencode"
+  );
+  const catalogPricedRecords = recordsWithoutObservedCost.filter(
+    (record) => record.source_provider !== "opencode"
+  );
+  if (catalogPricedRecords.length === 0) {
+    const hasUnpricedOpenCode = unpricedOpenCodeRecords.length > 0;
+    return {
+      estimated_cost_usd:
+        hasUnpricedOpenCode && observedCostCount === 0
+          ? null
+          : Math.round(observedCost * 1_000_000) / 1_000_000,
+      cost_status: hasUnpricedOpenCode ? (observedCostCount > 0 ? "partial" : "unknown") : "known",
+      pricing_catalog_version: pricingCatalogVersion
+    };
+  }
+
   const estimate = estimateUsageCost(
-    records.map((record) => ({
+    catalogPricedRecords.map((record) => ({
       model: record.model,
       input_tokens: record.input_tokens,
       cached_input_tokens: record.cached_input_tokens,
       output_tokens: record.output_tokens,
+      ...(record.cache_read_input_tokens !== undefined
+        ? { cache_read_input_tokens: record.cache_read_input_tokens }
+        : {}),
+      ...(record.cache_creation_input_tokens !== undefined
+        ? { cache_creation_input_tokens: record.cache_creation_input_tokens }
+        : {}),
       long_context: record.long_context,
       priority_tier: record.priority_tier
     })),
-    { showCost }
+    { showCost: true }
   );
 
+  const hasObservedCost = observedCostCount > 0;
+  const hasUnpricedOpenCode = unpricedOpenCodeRecords.length > 0;
+  const estimatedCost =
+    estimate.estimated_cost_usd === null
+      ? hasObservedCost
+        ? Math.round(observedCost * 1_000_000) / 1_000_000
+        : null
+      : Math.round((observedCost + estimate.estimated_cost_usd) * 1_000_000) / 1_000_000;
+
   return {
-    estimated_cost_usd: estimate.estimated_cost_usd,
-    cost_status: estimate.cost_status,
+    estimated_cost_usd: estimatedCost,
+    cost_status:
+      hasUnpricedOpenCode || (hasObservedCost && estimate.cost_status === "unknown")
+        ? "partial"
+        : estimate.cost_status,
     pricing_catalog_version: estimate.pricing_catalog_version
   };
 };
@@ -141,10 +207,14 @@ const aggregatePeriod = (
 ): UsagePeriod => {
   const included = recordsInWindow(records, start, endExclusive);
   const period = emptyPeriod(start, endExclusive, showCost ? "known" : "disabled");
-  for (const record of included) addUsage(period, record);
   const warnings = recordWarningCodes(included);
   const estimate = estimateRecords(included, showCost);
-  return withTotals({ ...period, ...estimate, warning_codes: warnings });
+  return {
+    ...period,
+    ...estimate,
+    total_tokens: totalTokensForRecords(included),
+    warning_codes: warnings
+  };
 };
 
 const buildDaily = (
@@ -173,43 +243,69 @@ const buildModels = (
   endExclusive: string,
   showCost: boolean
 ): ModelUsage[] => {
-  const models = new Map<string, { usage: ModelUsage; records: SessionUsageRecord[] }>();
+  const models = new Map<string, SessionUsageRecord[]>();
   for (const record of recordsInWindow(records, start, endExclusive)) {
     const name = sanitizeModelName(record.model);
-    const item =
-      models.get(name) ??
-      ({
-        usage: {
-          name,
-          input_tokens: 0,
-          cached_input_tokens: 0,
-          output_tokens: 0,
-          total_tokens: 0,
-          estimated_cost_usd: null,
-          cost_status: showCost ? "known" : "disabled",
-          pricing_catalog_version: pricingCatalogVersion,
-          warning_codes: []
-        },
-        records: []
-      } satisfies { usage: ModelUsage; records: SessionUsageRecord[] });
-    addUsage(item.usage, record);
-    item.usage.long_context_tokens =
-      (item.usage.long_context_tokens ?? 0) +
-      (record.long_context === true ? record.input_tokens + record.output_tokens : 0);
-    item.usage.priority_tokens =
-      (item.usage.priority_tokens ?? 0) +
-      priorityTokens(record.priority_tier, record.input_tokens, record.output_tokens);
-    item.records.push(record);
+    const item = models.get(name) ?? [];
+    item.push(record);
     models.set(name, item);
   }
 
-  return [...models.values()]
-    .map(({ usage, records: modelRecords }) => {
+  return [...models.entries()]
+    .map(([name, modelRecords]) => {
       const estimate = estimateRecords(modelRecords, showCost);
-      return withTotals({ ...usage, ...estimate, warning_codes: recordWarningCodes(modelRecords) });
+      return {
+        name,
+        total_tokens: totalTokensForRecords(modelRecords),
+        ...estimate,
+        warning_codes: recordWarningCodes(modelRecords)
+      };
     })
     .sort((a, b) => b.total_tokens - a.total_tokens)
     .slice(0, 25);
+};
+
+const buildUsageSections = (
+  records: readonly SessionUsageRecord[],
+  today: string,
+  tomorrow: string,
+  start7: string,
+  start14: string,
+  start30: string,
+  startDaily: string,
+  showCost: boolean
+): Pick<AggregateSnapshot, "periods" | "daily" | "models"> => ({
+  periods: {
+    today: aggregatePeriod(records, today, tomorrow, showCost),
+    last_7_days: aggregatePeriod(records, start7, tomorrow, showCost),
+    last_14_days: aggregatePeriod(records, start14, tomorrow, showCost),
+    last_30_days: aggregatePeriod(records, start30, tomorrow, showCost)
+  },
+  daily: buildDaily(records, startDaily, tomorrow, showCost),
+  models: buildModels(records, start30, tomorrow, showCost)
+});
+
+const buildSourceSummaries = (
+  records: readonly SessionUsageRecord[],
+  today: string,
+  tomorrow: string,
+  start7: string,
+  start14: string,
+  start30: string,
+  startDaily: string,
+  showCost: boolean
+): SourceSummary[] => {
+  const providers: SourceProvider[] = ["codex", "opencode", "claude"];
+  return providers.flatMap((provider) => {
+    const providerRecords = records.filter((record) => (record.source_provider ?? "codex") === provider);
+    if (providerRecords.length === 0) return [];
+    return [
+      {
+        provider,
+        ...buildUsageSections(providerRecords, today, tomorrow, start7, start14, start30, startDaily, showCost)
+      }
+    ];
+  });
 };
 
 const dedupeRecords = (
@@ -237,7 +333,8 @@ export function buildAggregate(
   const today = localDateKey(now);
   const tomorrow = addDays(today, 1);
   const start30 = addDays(today, -29);
-  const startDaily = addDays(today, -30);
+  const start14 = addDays(today, -13);
+  const startDaily = addDays(today, -14);
   const start7 = addDays(today, -6);
   const showCost = options.showCost ?? true;
   const normalized = toLocalRecords(rows);
@@ -254,24 +351,42 @@ export function buildAggregate(
     ).map((code) => warning(code))
   ];
   const warnings = mergeWarnings(aggregateWarnings);
+  const sections = buildUsageSections(
+    deduped.records,
+    today,
+    tomorrow,
+    start7,
+    start14,
+    start30,
+    startDaily,
+    showCost
+  );
+  const sourceSummaries = buildSourceSummaries(
+    deduped.records,
+    today,
+    tomorrow,
+    start7,
+    start14,
+    start30,
+    startDaily,
+    showCost
+  );
 
   return {
     schema_version: AGGREGATE_SCHEMA_VERSION,
     machine_id: options.machineId,
     machine_label: options.machineLabel.slice(0, 80),
     generated_at: now.toISOString(),
-    periods: {
-      today: aggregatePeriod(deduped.records, today, tomorrow, showCost),
-      last_7_days: aggregatePeriod(deduped.records, start7, tomorrow, showCost),
-      last_30_days: aggregatePeriod(deduped.records, start30, tomorrow, showCost)
-    },
-    daily: buildDaily(deduped.records, startDaily, tomorrow, showCost),
-    models: buildModels(deduped.records, start30, tomorrow, showCost),
+    ...sections,
+    ...(sourceSummaries.length > 0 ? { source_summaries: sourceSummaries } : {}),
     collector: {
       version: COLLECTOR_VERSION,
       source: "codexbar-local-cost",
       codex_home: options.codexHomeKind,
       cost_engine_version: COST_ENGINE_VERSION,
+      supported_providers: options.supportedProviders ?? SUPPORTED_PROVIDERS,
+      enabled_providers: options.enabledProviders ?? ["codex"],
+      provider_statuses: options.providerStatuses ?? [],
       sources: options.sources ?? [],
       warnings
     }

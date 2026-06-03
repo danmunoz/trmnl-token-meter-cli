@@ -9,6 +9,7 @@ interface NormalizeResult {
 export interface TokenUsageContext {
   currentModel?: string;
   sessionId?: string;
+  currentTurnId?: string;
   branchId?: string;
   parentId?: string;
   forkTimestamp?: string;
@@ -20,6 +21,7 @@ export function mergeTokenUsageContext(
 ): void {
   if (update.currentModel) target.currentModel = update.currentModel;
   if (update.sessionId && !target.sessionId) target.sessionId = update.sessionId;
+  if (update.currentTurnId) target.currentTurnId = update.currentTurnId;
   if (update.branchId && !target.branchId) target.branchId = update.branchId;
   if (update.parentId && !target.parentId) target.parentId = update.parentId;
   if (update.forkTimestamp && !target.forkTimestamp) target.forkTimestamp = update.forkTimestamp;
@@ -111,6 +113,14 @@ function turnContext(object: Record<string, unknown>): TokenUsageContext | undef
   return currentModel ? { currentModel } : undefined;
 }
 
+function taskStartedContext(object: Record<string, unknown>): TokenUsageContext | undefined {
+  if (object.type !== "event_msg") return undefined;
+  const payload = objectField(object.payload);
+  if (payload?.type !== "task_started") return undefined;
+  const currentTurnId = stringField(payload.id ?? payload.turn_id ?? payload.turnId, "");
+  return currentTurnId ? { currentTurnId } : undefined;
+}
+
 export function normalizeTokenUsageRecord(
   record: unknown,
   context: TokenUsageContext = {}
@@ -118,20 +128,28 @@ export function normalizeTokenUsageRecord(
   if (!record || typeof record !== "object") return { malformed: true };
   const object = record as Record<string, unknown>;
 
-  const contextUpdate = sessionContext(object) ?? turnContext(object);
+  const contextUpdate = sessionContext(object) ?? turnContext(object) ?? taskStartedContext(object);
   if (contextUpdate) return { malformed: false, context: contextUpdate };
 
   const payload = objectField(object.payload);
-  const info = objectField(payload?.info);
+  const data = objectField(object.data);
+  const info = objectField(payload?.info) ?? objectField(data?.info);
   const nestedTokenCount = object.type === "event_msg" && payload?.type === "token_count";
   const hasTotalUsage =
     info?.total_token_usage ??
     info?.totalTokenUsage ??
+    data?.total_token_usage ??
+    data?.totalTokenUsage ??
     object.total_token_usage ??
     object.totalTokenUsage;
   const hasLastUsage =
-    info?.last_token_usage ?? info?.lastTokenUsage ?? object.last_token_usage ?? object.lastTokenUsage;
-  const usage = hasLastUsage ?? hasTotalUsage ?? object.token_usage ?? object.usage;
+    info?.last_token_usage ??
+    info?.lastTokenUsage ??
+    data?.last_token_usage ??
+    data?.lastTokenUsage ??
+    object.last_token_usage ??
+    object.lastTokenUsage;
+  const usage = hasLastUsage ?? hasTotalUsage ?? data?.token_usage ?? data?.tokenUsage ?? data?.usage ?? object.token_usage ?? object.usage;
 
   if (!usage || typeof usage !== "object") return { malformed: false };
   const usageObject = usage as Record<string, unknown>;
@@ -154,12 +172,14 @@ export function normalizeTokenUsageRecord(
         info?.model ??
         info?.model_name ??
         payload?.model ??
+        data?.model ??
+        data?.model_name ??
         usageObject.model ??
         object.model,
       "unknown"
     ),
     session_id: stringField(
-      object.session_id ?? object.sessionId ?? object.conversation_id ?? context.sessionId,
+      object.session_id ?? object.sessionId ?? object.conversation_id ?? data?.session_id ?? data?.sessionId ?? data?.conversation_id ?? context.sessionId,
       "unknown"
     ),
     record_kind: hasLastUsage ? "delta" : hasTotalUsage ? "cumulative" : "delta"
@@ -184,6 +204,8 @@ export function normalizeTokenUsageRecord(
     ) ?? "base";
   const branchId = stringField(object.branch_id ?? object.branchId ?? context.branchId, "");
   const parentId = stringField(object.parent_id ?? object.parentId ?? context.parentId, "");
+  const turnId = stringField(payload?.turn_id ?? payload?.turnId ?? payload?.id ?? context.currentTurnId, "");
+  if (turnId) event.turn_id = turnId;
   if (branchId) event.branch_id = branchId;
   if (parentId) event.parent_id = parentId;
   if (nestedTokenCount && event.session_id === "unknown" && context.sessionId) {

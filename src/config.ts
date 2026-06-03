@@ -1,9 +1,11 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import type { CollectorCredential } from "./types.js";
+import type { CollectorCredential, SourceNoticeState } from "./types.js";
+import { parseProviders } from "./source-providers.js";
 
 const DEFAULT_API_BASE_URL = "https://trmnl-token-meter-backend.trmnltkn.workers.dev";
+export const CONFIG_DISABLED_PROVIDERS_SENTINEL = "none";
 
 export interface CollectorConfig {
   apiBaseUrl: string;
@@ -15,10 +17,14 @@ export interface CollectorConfig {
   serviceDir: string;
   serviceStatePath: string;
   serviceMetadataPath: string;
+  sourceNoticeStatePath: string;
   updateCheckPath: string;
   logLevel: string;
   includePiSessions: boolean;
   piSessionsHome: string;
+  opencodeDbPath: string;
+  claudeProjectsRoots: string[] | null;
+  enabledProviders: ReturnType<typeof parseProviders>;
 }
 
 const isLoopbackHost = (hostname: string): boolean =>
@@ -65,6 +71,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
   const configDir = env.TRMNL_TOKEN_METER_CONFIG_DIR ?? defaultConfigDir();
   const cacheDir = env.TRMNL_TOKEN_METER_CACHE_DIR ?? defaultCacheDir();
   const apiBaseUrl = env.TRMNL_TOKEN_METER_API_BASE_URL ?? DEFAULT_API_BASE_URL;
+  const claudeProjectsInput =
+    env.TRMNL_TOKEN_METER_CLAUDE_PROJECTS_HOME ?? env.TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR ?? env.CLAUDE_CONFIG_DIR;
+  const enabledProviders =
+    env.TRMNL_TOKEN_METER_ENABLED_PROVIDERS === CONFIG_DISABLED_PROVIDERS_SENTINEL
+      ? []
+      : parseProviders(env.TRMNL_TOKEN_METER_ENABLED_PROVIDERS, ["codex"]);
   return {
     apiBaseUrl: normalizeApiBaseUrl(apiBaseUrl),
     codexHome: resolve(codexHome),
@@ -75,10 +87,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     serviceDir: resolve(configDir, "service-runner"),
     serviceStatePath: resolve(configDir, "sync-state.json"),
     serviceMetadataPath: resolve(configDir, "service.json"),
+    sourceNoticeStatePath: resolve(configDir, "source-state.json"),
     updateCheckPath: resolve(configDir, "update-check.json"),
     logLevel: env.LOG_LEVEL ?? "info",
     includePiSessions: env.TRMNL_TOKEN_METER_INCLUDE_PI_SESSIONS === "1",
-    piSessionsHome: resolve(env.PI_HOME ?? join(homedir(), ".pi"))
+    piSessionsHome: resolve(env.PI_HOME ?? join(homedir(), ".pi")),
+    opencodeDbPath: resolve(
+      env.TRMNL_TOKEN_METER_OPENCODE_DB ?? join(homedir(), ".local", "share", "opencode", "opencode.db")
+    ),
+    claudeProjectsRoots: claudeProjectsInput
+      ? claudeProjectsInput
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .map((part) => {
+            const path = resolve(part);
+            return path.split(/[\\/]/).at(-1) === "projects" ? path : join(path, "projects");
+          })
+      : null,
+    enabledProviders
   };
 }
 
@@ -99,6 +126,27 @@ export async function loadCredential(path: string): Promise<CollectorCredential 
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+const defaultSourceNoticeState: SourceNoticeState = {
+  known_supported_providers: ["codex"]
+};
+
+export async function loadSourceNoticeState(config: CollectorConfig): Promise<SourceNoticeState> {
+  try {
+    return (JSON.parse(await readFile(config.sourceNoticeStatePath, "utf8")) as SourceNoticeState) ?? defaultSourceNoticeState;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return defaultSourceNoticeState;
+    throw error;
+  }
+}
+
+export async function saveSourceNoticeState(
+  config: CollectorConfig,
+  state: SourceNoticeState
+): Promise<void> {
+  await mkdir(dirname(config.sourceNoticeStatePath), { recursive: true, mode: 0o700 });
+  await writeFile(config.sourceNoticeStatePath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
 }
 
 export async function deleteCredential(path: string): Promise<void> {

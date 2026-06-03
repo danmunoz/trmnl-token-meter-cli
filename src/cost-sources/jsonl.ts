@@ -10,6 +10,7 @@ import type {
   CollectorWarning,
   LocalUsageSourceKind,
   LocalUsageSourceStatus,
+  SourceProvider,
   SessionUsageRecord,
   UsageEvent,
   WarningCode
@@ -53,6 +54,7 @@ async function discoverJsonlFiles(dir: string, output: string[] = []): Promise<s
 const eventDedupeKey = (event: UsageEvent): string =>
   [
     event.session_id,
+    event.turn_id ?? "",
     event.timestamp.toISOString(),
     event.model,
     event.input_tokens,
@@ -62,14 +64,17 @@ const eventDedupeKey = (event: UsageEvent): string =>
 
 export const recordFromEvent = (
   event: UsageEvent,
-  sourceKind: LocalUsageSourceKind
+  sourceKind: LocalUsageSourceKind,
+  sourceProvider: SourceProvider = "codex"
 ): SessionUsageRecord => ({
   dedupe_key: eventDedupeKey(event),
+  source_provider: sourceProvider,
   source_kind: sourceKind,
   occurred_at: event.timestamp,
   local_date: localDateKey(event.timestamp),
   model: event.model,
   model_alias: event.model,
+  ...(event.turn_id ? { turn_id: event.turn_id } : {}),
   input_tokens: event.input_tokens,
   cached_input_tokens: event.cached_input_tokens,
   output_tokens: event.output_tokens,

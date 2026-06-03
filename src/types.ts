@@ -3,14 +3,15 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json") as { version?: unknown };
 
-export const AGGREGATE_SCHEMA_VERSION = "2026-05-15.v2-codexbar-cost";
+export const AGGREGATE_SCHEMA_VERSION = "2026-05-28.v4-14day-window";
 export const COLLECTOR_VERSION =
   typeof packageJson.version === "string" ? packageJson.version : "0.0.0-development";
-export const COST_ENGINE_VERSION = "2026-05-15.codexbar-parity";
+export const COST_ENGINE_VERSION = "2026-06-02.codexbar-parity";
 export const DEFAULT_UPLOAD_INTERVAL_MINUTES = 60;
 
 export type CostStatus = "known" | "partial" | "unknown" | "disabled";
 export type WarningSeverity = "info" | "warning" | "error";
+export type SourceProvider = "codex" | "opencode" | "claude";
 export type WarningCode =
   | "codex_sessions_missing"
   | "codex_archived_sessions_missing"
@@ -20,6 +21,9 @@ export type WarningCode =
   | "priority_evidence_missing"
   | "priority_evidence_unreadable"
   | "priority_evidence_malformed"
+  | "opencode_sqlite_missing"
+  | "opencode_sqlite_unreadable"
+  | "opencode_sqlite_malformed"
   | "pi_sessions_disabled"
   | "pi_sessions_missing"
   | "pi_sessions_malformed"
@@ -37,12 +41,15 @@ export interface TokenUsage {
   input_tokens: number;
   cached_input_tokens: number;
   output_tokens: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
 }
 
 export interface UsageEvent extends TokenUsage {
   timestamp: Date;
   model: string;
   session_id: string;
+  turn_id?: string;
   branch_id?: string;
   parent_id?: string;
   long_context?: boolean | "unknown";
@@ -50,7 +57,7 @@ export interface UsageEvent extends TokenUsage {
   record_kind: "delta" | "cumulative";
 }
 
-export interface UsagePeriod extends TokenUsage {
+export interface UsagePeriod {
   start: string;
   end: string;
   total_tokens: number;
@@ -66,21 +73,21 @@ export interface DailyUsage extends UsagePeriod {
   is_missing: boolean;
 }
 
-export interface ModelUsage extends TokenUsage {
+export interface ModelUsage {
   name: string;
   total_tokens: number;
   estimated_cost_usd: number | null;
   cost_status: CostStatus;
   pricing_catalog_version: string;
   warning_codes: WarningCode[];
-  long_context_tokens?: number;
-  priority_tokens?: number;
 }
 
 export type LocalUsageSourceKind =
   | "codex_sessions"
   | "codex_archived_sessions"
   | "codex_priority_sqlite"
+  | "opencode_sqlite"
+  | "claude_projects"
   | "pi_sessions";
 
 export type LocalUsageSourceStatusValue =
@@ -98,27 +105,37 @@ export interface LocalUsageSourceStatus {
   warning_code?: WarningCode;
 }
 
+export interface ProviderStatus {
+  provider: SourceProvider;
+  status: "available" | LocalUsageSourceStatusValue;
+  warning_code?: WarningCode;
+}
+
 export interface PriorityTierEvidence {
   match_key: string;
   tier: "base" | "priority" | "unknown";
   confidence: "exact" | "inferred" | "unmatched";
+  model?: string;
   warning_code?: WarningCode;
 }
 
 export interface SessionUsageRecord extends TokenUsage {
   dedupe_key: string;
+  source_provider: SourceProvider;
   source_kind: LocalUsageSourceKind;
   occurred_at: Date;
   local_date: string;
   model: string;
   model_alias?: string;
+  turn_id?: string;
+  observed_cost_usd?: number;
   long_context: boolean | "unknown";
   priority_tier: "base" | "priority" | "unknown";
   pricing_known: boolean;
 }
 
 export interface CostWindow {
-  name: "today" | "last_7_days" | "last_30_days";
+  name: "today" | "last_7_days" | "last_14_days" | "last_30_days";
   start: string;
   end: string;
 }
@@ -126,6 +143,7 @@ export interface CostWindow {
 export interface CostAggregationResult {
   records: SessionUsageRecord[];
   sources: LocalUsageSourceStatus[];
+  providerStatuses: ProviderStatus[];
   warnings: CollectorWarning[];
 }
 
@@ -137,18 +155,30 @@ export interface AggregateSnapshot {
   periods: {
     today: UsagePeriod;
     last_7_days: UsagePeriod;
+    last_14_days: UsagePeriod;
     last_30_days: UsagePeriod;
   };
   daily: DailyUsage[];
   models: ModelUsage[];
+  source_summaries?: SourceSummary[];
   collector: {
     version: string;
     source: "codexbar-local-cost";
     codex_home: "default" | "custom";
     cost_engine_version: string;
+    supported_providers: SourceProvider[];
+    enabled_providers: SourceProvider[];
     sources: LocalUsageSourceStatus[];
+    provider_statuses: ProviderStatus[];
     warnings: CollectorWarning[];
   };
+}
+
+export interface SourceSummary {
+  provider: SourceProvider;
+  periods: AggregateSnapshot["periods"];
+  daily: DailyUsage[];
+  models: ModelUsage[];
 }
 
 export interface CollectorCredential {
@@ -157,4 +187,9 @@ export interface CollectorCredential {
   machine_id: string;
   machine_label: string;
   upload_interval_minutes: number;
+  enabled_providers?: SourceProvider[];
+}
+
+export interface SourceNoticeState {
+  known_supported_providers: SourceProvider[];
 }

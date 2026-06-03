@@ -36,7 +36,12 @@ describe("status UI", () => {
           syncState: {
             last_sync_at: "2026-05-19T09:55:00.000Z",
             last_status: "success"
-          }
+          },
+          sources: [
+            { kind: "codex_sessions", enabled: true, status: "read", record_count: 2 },
+            { kind: "opencode_sqlite", enabled: true, status: "missing" },
+            { kind: "claude_projects", enabled: true, status: "read", record_count: 1 }
+          ]
         },
         formatDate
       )
@@ -52,7 +57,12 @@ describe("status UI", () => {
         Configured upload interval: every 1 hour
         Background runner version: 0.1.1 (matches current CLI)
         Background sync: launchd every 60 minutes
-        Last local sync: 2026-05-19T09:55:00.000Z"
+        Last local sync: 2026-05-19T09:55:00.000Z
+
+      Sources
+        Codex sessions: read (2 records)
+        OpenCode SQLite: missing
+        Claude projects: read (1 record)"
     `);
   });
 
