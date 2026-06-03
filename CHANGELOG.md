@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.2.3...trmnl-token-meter-0.3.0) (2026-06-03)
+
+
+### Features
+
+* add Claude and Opencode source summaries ([49cfb33](https://github.com/danmunoz/trmnl-token-meter-cli/commit/49cfb332802ddc923f6acee466d3158d9123ba28))
+* add Claude and Opencode source summaries ([118fe5a](https://github.com/danmunoz/trmnl-token-meter-cli/commit/118fe5aa657ca46943a87bd0963c46d59d57b4d0))
+
 ## [0.2.3](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.2.2...trmnl-token-meter-0.2.3) (2026-05-22)
 
 
