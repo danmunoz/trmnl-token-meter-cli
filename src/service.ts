@@ -117,7 +117,9 @@ async function verifyStableRunner(runner: string): Promise<void> {
       );
     }
   } catch (error) {
-    throw new Error(`Could not verify service runner installation: ${commandFailureMessage(error)}`);
+    throw new Error(`Could not verify service runner installation: ${commandFailureMessage(error)}`, {
+      cause: error
+    });
   }
 }
 

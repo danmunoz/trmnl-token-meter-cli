@@ -129,7 +129,7 @@ async function fetchWithPolicy(
           await delay(250 * (attempt + 1));
           continue;
         }
-        throw new Error(`${operation} request timed out after ${timeoutMs}ms`);
+        throw new Error(`${operation} request timed out after ${timeoutMs}ms`, { cause: error });
       }
       if (attempt < retryLimit && isRetryableError(error)) {
         await delay(250 * (attempt + 1));

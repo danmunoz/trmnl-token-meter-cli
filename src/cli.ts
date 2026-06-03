@@ -171,7 +171,8 @@ async function uploadOnce(config: CollectorConfig): Promise<void> {
       await saveSyncState(config, { last_status: "error", last_error: "collector_revoked" });
       await uninstallBackgroundService(config, { removeRunner: true }).catch(() => undefined);
       throw new Error(
-        "This meter was revoked on the server. Background sync was stopped. Run `trmnl-token-meter add` to pair again."
+        "This meter was revoked on the server. Background sync was stopped. Run `trmnl-token-meter add` to pair again.",
+        { cause: error }
       );
     }
     await saveSyncState(config, { last_status: "error", last_error: safeErrorMessage(error) });
