@@ -1,6 +1,6 @@
 {
   "name": "trmnl-token-meter",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Local AI coding usage collector for the TRMNL Token Meter plugin.",
   "private": false,
   "type": "module",

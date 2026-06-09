@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.3.1...trmnl-token-meter-0.3.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* preserve node:sqlite in packaged CLI ([a24a635](https://github.com/danmunoz/trmnl-token-meter-cli/commit/a24a635abf311259c5a25333be86e4159161d415))
+
 ## [0.3.1](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.3.0...trmnl-token-meter-0.3.1) (2026-06-03)
 
 
