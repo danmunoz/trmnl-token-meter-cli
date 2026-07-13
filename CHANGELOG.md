@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.3.2...trmnl-token-meter-0.4.0) (2026-07-13)
+
+
+### Features
+
+* add cost pricing for new Claude/Codex models ([1a90767](https://github.com/danmunoz/trmnl-token-meter-cli/commit/1a9076793529fd14a0db3fc9490c6ffdf33046bf))
+* add cost pricing for new Claude/Codex models ([f1bfd74](https://github.com/danmunoz/trmnl-token-meter-cli/commit/f1bfd7419a69b56215b042a5e59c565a6b31827d))
+
 ## [0.3.2](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.3.1...trmnl-token-meter-0.3.2) (2026-06-09)
 
 
