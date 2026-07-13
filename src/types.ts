@@ -6,7 +6,7 @@ const packageJson = require("../package.json") as { version?: unknown };
 export const AGGREGATE_SCHEMA_VERSION = "2026-05-28.v4-14day-window";
 export const COLLECTOR_VERSION =
   typeof packageJson.version === "string" ? packageJson.version : "0.0.0-development";
-export const COST_ENGINE_VERSION = "2026-06-02.codexbar-parity";
+export const COST_ENGINE_VERSION = "2026-07-12.codexbar-parity";
 export const DEFAULT_UPLOAD_INTERVAL_MINUTES = 60;
 
 export type CostStatus = "known" | "partial" | "unknown" | "disabled";

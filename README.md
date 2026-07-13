@@ -81,7 +81,7 @@ Compact representative example:
       "total_tokens": 162000,
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-06-02.codexbar-parity",
+      "pricing_catalog_version": "2026-07-12.codexbar-parity",
       "warning_codes": []
     },
     "last_7_days": {
@@ -90,7 +90,7 @@ Compact representative example:
       "total_tokens": 680000,
       "estimated_cost_usd": 5.4321,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-06-02.codexbar-parity",
+      "pricing_catalog_version": "2026-07-12.codexbar-parity",
       "warning_codes": []
     },
     "last_14_days": {
@@ -99,7 +99,7 @@ Compact representative example:
       "total_tokens": 1040000,
       "estimated_cost_usd": 8.7654,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-06-02.codexbar-parity",
+      "pricing_catalog_version": "2026-07-12.codexbar-parity",
       "warning_codes": []
     },
     "last_30_days": {
@@ -108,7 +108,7 @@ Compact representative example:
       "total_tokens": 2120000,
       "estimated_cost_usd": 16.789,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-06-02.codexbar-parity",
+      "pricing_catalog_version": "2026-07-12.codexbar-parity",
       "warning_codes": []
     }
   },
@@ -120,7 +120,7 @@ Compact representative example:
       "total_tokens": 162000,
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-06-02.codexbar-parity",
+      "pricing_catalog_version": "2026-07-12.codexbar-parity",
       "warning_codes": [],
       "has_usage": true,
       "is_missing": false
@@ -132,7 +132,7 @@ Compact representative example:
       "total_tokens": 136000,
       "estimated_cost_usd": 1.01,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-06-02.codexbar-parity",
+      "pricing_catalog_version": "2026-07-12.codexbar-parity",
       "warning_codes": []
     }
   ],
@@ -148,7 +148,7 @@ Compact representative example:
     "version": "0.1.0",
     "source": "codexbar-local-cost",
     "codex_home": "default",
-    "cost_engine_version": "2026-06-02.codexbar-parity",
+    "cost_engine_version": "2026-07-12.codexbar-parity",
     "supported_providers": ["codex", "opencode", "claude"],
     "enabled_providers": ["codex"],
     "provider_statuses": [
