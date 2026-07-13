@@ -23,9 +23,21 @@ export type PricingModel = {
   price: ModelPrice;
 };
 
-export const pricingCatalogVersion = "2026-06-02.codexbar-parity" as const;
+export const pricingCatalogVersion = "2026-07-12.codexbar-parity" as const;
 
 export const pricingCatalog: PricingModel[] = [
+  {
+    id: "claude-fable-5",
+    aliases: ["claude-fable-5"],
+    effectiveDate: "2026-07-12",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 10,
+      cachedInputUsdPerMillion: 1,
+      cacheCreationUsdPerMillion: 12.5,
+      outputUsdPerMillion: 50
+    }
+  },
   {
     id: "claude-haiku-4-5",
     aliases: ["claude-haiku-4-5", "claude-haiku-4-5-20251001"],
@@ -104,20 +116,18 @@ export const pricingCatalog: PricingModel[] = [
     }
   },
   {
+    // CodexBar #1372 repriced Sonnet 4.6 to flat standard pricing; the tiered
+    // long-context rates now apply only to records before the March 2026 cutoff,
+    // which this collector never reports (last 30 days only).
     id: "claude-sonnet-4-6",
     aliases: ["claude-sonnet-4-6"],
-    effectiveDate: "2026-05-15",
+    effectiveDate: "2026-07-12",
     source: "CodexBar CostUsagePricing",
     price: {
       inputUsdPerMillion: 3,
       cachedInputUsdPerMillion: 0.3,
       cacheCreationUsdPerMillion: 3.75,
-      outputUsdPerMillion: 15,
-      thresholdTokens: 200_000,
-      inputUsdPerMillionAboveThreshold: 6,
-      cachedInputUsdPerMillionAboveThreshold: 0.6,
-      cacheCreationUsdPerMillionAboveThreshold: 7.5,
-      outputUsdPerMillionAboveThreshold: 22.5
+      outputUsdPerMillion: 15
     }
   },
   {
@@ -159,6 +169,76 @@ export const pricingCatalog: PricingModel[] = [
       cachedInputUsdPerMillionAboveThreshold: 0.6,
       cacheCreationUsdPerMillionAboveThreshold: 7.5,
       outputUsdPerMillionAboveThreshold: 22.5
+    }
+  },
+  {
+    // GPT-5.6 Sol/Terra/Luna. Full-row long-context: >272K input tokens reprices
+    // the whole request. cacheCreation mirrors CodexBar's cache-write rate (1.25x
+    // input); Codex rows in this collector never carry a separate cache-write lane,
+    // so it stays as documented parity data.
+    id: "gpt-5.6-sol",
+    aliases: ["gpt-5.6-sol", "gpt-5.6"],
+    effectiveDate: "2026-07-12",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 5,
+      cachedInputUsdPerMillion: 0.5,
+      cacheCreationUsdPerMillion: 6.25,
+      outputUsdPerMillion: 30,
+      thresholdTokens: 272_000,
+      thresholdMode: "full-row",
+      inputUsdPerMillionAboveThreshold: 10,
+      cachedInputUsdPerMillionAboveThreshold: 1,
+      cacheCreationUsdPerMillionAboveThreshold: 12.5,
+      outputUsdPerMillionAboveThreshold: 45,
+      priorityInputUsdPerMillion: 10,
+      priorityCachedInputUsdPerMillion: 1,
+      priorityOutputUsdPerMillion: 60,
+      priorityInputTokenLimit: 272_000
+    }
+  },
+  {
+    id: "gpt-5.6-terra",
+    aliases: ["gpt-5.6-terra"],
+    effectiveDate: "2026-07-12",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 2.5,
+      cachedInputUsdPerMillion: 0.25,
+      cacheCreationUsdPerMillion: 3.125,
+      outputUsdPerMillion: 15,
+      thresholdTokens: 272_000,
+      thresholdMode: "full-row",
+      inputUsdPerMillionAboveThreshold: 5,
+      cachedInputUsdPerMillionAboveThreshold: 0.5,
+      cacheCreationUsdPerMillionAboveThreshold: 6.25,
+      outputUsdPerMillionAboveThreshold: 22.5,
+      priorityInputUsdPerMillion: 5,
+      priorityCachedInputUsdPerMillion: 0.5,
+      priorityOutputUsdPerMillion: 30,
+      priorityInputTokenLimit: 272_000
+    }
+  },
+  {
+    id: "gpt-5.6-luna",
+    aliases: ["gpt-5.6-luna"],
+    effectiveDate: "2026-07-12",
+    source: "CodexBar CostUsagePricing",
+    price: {
+      inputUsdPerMillion: 1,
+      cachedInputUsdPerMillion: 0.1,
+      cacheCreationUsdPerMillion: 1.25,
+      outputUsdPerMillion: 6,
+      thresholdTokens: 272_000,
+      thresholdMode: "full-row",
+      inputUsdPerMillionAboveThreshold: 2,
+      cachedInputUsdPerMillionAboveThreshold: 0.2,
+      cacheCreationUsdPerMillionAboveThreshold: 2.5,
+      outputUsdPerMillionAboveThreshold: 9,
+      priorityInputUsdPerMillion: 2,
+      priorityCachedInputUsdPerMillion: 0.2,
+      priorityOutputUsdPerMillion: 12,
+      priorityInputTokenLimit: 272_000
     }
   },
   {

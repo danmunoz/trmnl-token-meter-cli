@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { estimateUsageCost, findPricingModel, normalizeEstimateModelName } from "../../src/pricing/index.js";
+import {
+  estimateUsageCost,
+  findPricingModel,
+  normalizeEstimateModelName,
+  roundUsd
+} from "../../src/pricing/index.js";
 
 describe("Claude pricing parity", () => {
   it("normalizes Claude provider prefixes and dated variants", () => {
@@ -73,7 +78,7 @@ describe("Claude pricing parity", () => {
   it("applies Claude tiered long-context rates at the CodexBar boundary", () => {
     const estimate = estimateUsageCost([
       {
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-4-5",
         input_tokens: 200_010,
         cached_input_tokens: 5,
         output_tokens: 5,
@@ -89,13 +94,13 @@ describe("Claude pricing parity", () => {
   it("preserves Claude threshold pricing per request instead of aggregating first", () => {
     const estimate = estimateUsageCost([
       {
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-4-5",
         input_tokens: 150_000,
         cached_input_tokens: 0,
         output_tokens: 0
       },
       {
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-4-5",
         input_tokens: 150_000,
         cached_input_tokens: 0,
         output_tokens: 0
@@ -103,7 +108,7 @@ describe("Claude pricing parity", () => {
     ]);
     const aggregateFirst = estimateUsageCost([
       {
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-4-5",
         input_tokens: 300_000,
         cached_input_tokens: 0,
         output_tokens: 0
@@ -112,5 +117,41 @@ describe("Claude pricing parity", () => {
 
     expect(estimate.estimated_cost_usd).toBe(0.9);
     expect(aggregateFirst.estimated_cost_usd).toBe(1.2);
+  });
+
+  it("prices claude-sonnet-4-6 as flat after the CodexBar long-context reprice", () => {
+    expect(findPricingModel("claude-sonnet-4-6")?.price.thresholdTokens).toBeUndefined();
+
+    const estimate = estimateUsageCost([
+      {
+        model: "claude-sonnet-4-6",
+        input_tokens: 300_000,
+        cached_input_tokens: 0,
+        output_tokens: 0
+      }
+    ]);
+
+    expect(estimate.cost_status).toBe("known");
+    expect(estimate.estimated_cost_usd).toBe(0.9);
+  });
+
+  it("prices the claude-fable-5 model at its flat rates", () => {
+    expect(findPricingModel("claude-fable-5")?.price.inputUsdPerMillion).toBe(10);
+
+    const estimate = estimateUsageCost([
+      {
+        model: "claude-fable-5",
+        input_tokens: 1_000,
+        cached_input_tokens: 200,
+        output_tokens: 500,
+        cache_creation_input_tokens: 100,
+        cache_read_input_tokens: 200
+      }
+    ]);
+
+    expect(estimate.cost_status).toBe("known");
+    expect(estimate.estimated_cost_usd).toBe(
+      roundUsd(1_000 * 1e-5 + 200 * 1e-6 + 100 * 1.25e-5 + 500 * 5e-5)
+    );
   });
 });

@@ -77,4 +77,54 @@ describe("CodexBar parity pricing", () => {
       roundUsd(272_001 * 1e-5 + 10 * 4.5e-5)
     );
   });
+
+  it("resolves the bare gpt-5.6 alias to the Sol tier", () => {
+    expect(findPricingModel("gpt-5.6")?.id).toBe("gpt-5.6-sol");
+    expect(findPricingModel("openai/gpt-5.6")?.id).toBe("gpt-5.6-sol");
+    expect(findPricingModel("gpt-5.6-terra")?.id).toBe("gpt-5.6-terra");
+    expect(findPricingModel("gpt-5.6-luna")?.id).toBe("gpt-5.6-luna");
+  });
+
+  it("prices GPT-5.6 Sol below the long-context threshold", () => {
+    const estimate = estimateUsageCost([
+      { model: "gpt-5.6-sol", input_tokens: 100_000, cached_input_tokens: 20_000, output_tokens: 10_000 }
+    ]);
+
+    expect(estimate.cost_status).toBe("known");
+    expect(estimate.estimated_cost_usd).toBe(
+      roundUsd(80_000 * 5e-6 + 20_000 * 5e-7 + 10_000 * 3e-5)
+    );
+  });
+
+  it("applies GPT-5.6 Sol full-row long-context rates above the threshold", () => {
+    const estimate = estimateUsageCost([
+      { model: "gpt-5.6-sol", input_tokens: 300_000, cached_input_tokens: 100_000, output_tokens: 1_000 }
+    ]);
+
+    expect(estimate.estimated_cost_usd).toBe(
+      roundUsd(200_000 * 1e-5 + 100_000 * 1e-6 + 1_000 * 4.5e-5)
+    );
+  });
+
+  it("applies GPT-5.6 Terra priority rates within the priority input limit", () => {
+    const estimate = estimateUsageCost([
+      {
+        model: "gpt-5.6-terra",
+        input_tokens: 100,
+        cached_input_tokens: 20,
+        output_tokens: 10,
+        priority_tier: "priority"
+      }
+    ]);
+
+    expect(estimate.estimated_cost_usd).toBe(roundUsd(80 * 5e-6 + 20 * 5e-7 + 10 * 3e-5));
+  });
+
+  it("prices GPT-5.6 Luna at its Codex rates", () => {
+    const estimate = estimateUsageCost([
+      { model: "gpt-5.6-luna", input_tokens: 50_000, cached_input_tokens: 0, output_tokens: 5_000 }
+    ]);
+
+    expect(estimate.estimated_cost_usd).toBe(roundUsd(50_000 * 1e-6 + 5_000 * 6e-6));
+  });
 });
