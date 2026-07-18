@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.0...trmnl-token-meter-0.4.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* **service:** pin background sync to a stable node launcher path ([9b3ed23](https://github.com/danmunoz/trmnl-token-meter-cli/commit/9b3ed234bb27542093ff748a5903adfc3e00982b))
+* **service:** pin background sync to a stable node launcher path ([352aeff](https://github.com/danmunoz/trmnl-token-meter-cli/commit/352aeffccc5011296a0983436a5179495a420c1a))
+
 ## [0.4.0](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.3.2...trmnl-token-meter-0.4.0) (2026-07-13)
 
 
