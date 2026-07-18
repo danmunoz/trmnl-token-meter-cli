@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { constants } from "node:fs";
+import { constants, realpathSync } from "node:fs";
 import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -70,6 +70,64 @@ const xmlEscape = (value: string): string =>
     .replaceAll('"', "&quot;");
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+
+/**
+ * Well-known, version-manager-managed launcher paths that stay stable across
+ * Node.js upgrades. Homebrew/MacPorts/Volta/asdf keep these entries pointed at
+ * the current install, whereas `process.execPath` resolves to a version-pinned
+ * keg (e.g. `.../Cellar/node/25.8.0/bin/node`) that dyld can no longer load once
+ * the formula is upgraded and the old shared libraries are removed.
+ */
+function defaultNodeLauncherCandidates(home = homedir()): string[] {
+  return [
+    "/opt/homebrew/bin/node",
+    "/opt/homebrew/opt/node/bin/node",
+    "/usr/local/bin/node",
+    "/usr/local/opt/node/bin/node",
+    "/opt/local/bin/node",
+    "/usr/bin/node",
+    join(home, ".volta", "bin", "node"),
+    join(home, ".asdf", "shims", "node")
+  ];
+}
+
+/**
+ * Resolve a stable interpreter path to embed in the scheduled job. Prefers a
+ * well-known launcher that resolves to the same binary as `execPath` so that a
+ * future `brew upgrade node` (or equivalent) keeps the background sync working
+ * instead of crash-looping with an `OS_REASON_DYLD` failure. Falls back to
+ * `execPath` when no stable alternative points at the running runtime, matching
+ * the previous behaviour for setups without a stable symlink (e.g. nvm/fnm).
+ */
+export function stableLauncherNodePath(
+  options: {
+    execPath?: string;
+    candidates?: string[];
+    realpath?: (path: string) => string;
+  } = {}
+): string {
+  const execPath = options.execPath ?? process.execPath;
+  const realpath = options.realpath ?? ((path: string) => realpathSync(path));
+  const candidates = options.candidates ?? defaultNodeLauncherCandidates();
+
+  let target: string;
+  try {
+    target = realpath(execPath);
+  } catch {
+    return execPath;
+  }
+
+  for (const candidate of candidates) {
+    if (candidate === execPath) continue;
+    try {
+      if (realpath(candidate) === target) return candidate;
+    } catch {
+      // Candidate does not exist on this machine; keep looking.
+    }
+  }
+
+  return execPath;
+}
 
 const normalizeProviderListForEnv = (providers: SourceProvider[]): string =>
   providers.length > 0 ? providers.join(",") : CONFIG_DISABLED_PROVIDERS_SENTINEL;
@@ -170,6 +228,7 @@ function launchdPlist(
   config: CollectorConfig,
   runner: string,
   intervalMinutes: number,
+  launcher: string,
   credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): string {
   const env = envForService(config, credential);
@@ -187,7 +246,7 @@ function launchdPlist(
   <string>${SERVICE_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${xmlEscape(process.execPath)}</string>
+    <string>${xmlEscape(launcher)}</string>
     <string>${xmlEscape(runner)}</string>
     <string>sync</string>
     <string>--once</string>
@@ -212,6 +271,7 @@ ${envXml}
 function systemdService(
   config: CollectorConfig,
   runner: string,
+  launcher: string,
   credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): string {
   const env = Object.entries(envForService(config, credential))
@@ -223,7 +283,7 @@ Description=TRMNL Token Meter sync
 [Service]
 Type=oneshot
 ${env}
-ExecStart="${process.execPath}" "${runner}" sync --once
+ExecStart="${launcher}" "${runner}" sync --once
 `;
 }
 
@@ -245,12 +305,13 @@ async function installLaunchd(
   config: CollectorConfig,
   runner: string,
   intervalMinutes: number,
+  launcher: string,
   runCommand: CommandRunner,
   credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): Promise<void> {
   const plistPath = join(homedir(), "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`);
   await mkdir(dirname(plistPath), { recursive: true });
-  await writeFile(plistPath, launchdPlist(config, runner, intervalMinutes, credential), {
+  await writeFile(plistPath, launchdPlist(config, runner, intervalMinutes, launcher, credential), {
     mode: 0o600
   });
   const target = `gui/${process.getuid?.() ?? ""}`;
@@ -262,6 +323,7 @@ async function installSystemd(
   config: CollectorConfig,
   runner: string,
   intervalMinutes: number,
+  launcher: string,
   runCommand: CommandRunner,
   credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): Promise<void> {
@@ -269,7 +331,7 @@ async function installSystemd(
   await mkdir(userDir, { recursive: true });
   await writeFile(
     join(userDir, "trmnl-token-meter.service"),
-    systemdService(config, runner, credential),
+    systemdService(config, runner, launcher, credential),
     { mode: 0o600 }
   );
   await writeFile(join(userDir, "trmnl-token-meter.timer"), systemdTimer(intervalMinutes), {
@@ -283,6 +345,7 @@ async function installCron(
   config: CollectorConfig,
   runner: string,
   intervalMinutes: number,
+  launcher: string,
   runCommand: CommandRunner,
   credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): Promise<void> {
@@ -294,7 +357,7 @@ async function installCron(
     ...Object.entries(envForService(config, credential)).map(
       ([key, value]) => `${key}=${shellQuote(value)}`
     ),
-    shellQuote(process.execPath),
+    shellQuote(launcher),
     shellQuote(runner),
     "sync",
     "--due",
@@ -328,20 +391,21 @@ export async function installBackgroundService(
 ): Promise<ServiceMetadata> {
   const runCommand = options.runCommand ?? defaultCommandRunner;
   const runner = await installStableRunner(config, options.sourceDir);
+  const launcher = stableLauncherNodePath();
   let method: ServiceMetadata["method"];
   if (platform() === "darwin") {
-    await installLaunchd(config, runner, intervalMinutes, runCommand, options.credential);
+    await installLaunchd(config, runner, intervalMinutes, launcher, runCommand, options.credential);
     method = "launchd";
   } else if (platform() === "linux") {
     try {
-      await installSystemd(config, runner, intervalMinutes, runCommand, options.credential);
+      await installSystemd(config, runner, intervalMinutes, launcher, runCommand, options.credential);
       method = "systemd";
     } catch {
-      await installCron(config, runner, intervalMinutes, runCommand, options.credential);
+      await installCron(config, runner, intervalMinutes, launcher, runCommand, options.credential);
       method = "cron";
     }
   } else {
-    await installCron(config, runner, intervalMinutes, runCommand, options.credential);
+    await installCron(config, runner, intervalMinutes, launcher, runCommand, options.credential);
     method = "cron";
   }
 

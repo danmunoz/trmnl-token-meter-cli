@@ -10,6 +10,7 @@ import {
   refreshInstalledRunner,
   saveSyncState,
   serviceStatus,
+  stableLauncherNodePath,
   type ServiceMetadata
 } from "../src/service.js";
 import { COLLECTOR_VERSION } from "../src/types.js";
@@ -227,5 +228,55 @@ describe("background service support", () => {
     });
     await expect(isSyncDue(config, 15, new Date("2026-05-18T12:10:00.000Z"))).resolves.toBe(false);
     await expect(isSyncDue(config, 15, new Date("2026-05-18T12:16:00.000Z"))).resolves.toBe(true);
+  });
+});
+
+describe("stableLauncherNodePath", () => {
+  const cellar = "/opt/homebrew/Cellar/node/25.8.0/bin/node";
+  const brewSymlink = "/opt/homebrew/bin/node";
+
+  it("prefers a stable launcher that resolves to the running node binary", () => {
+    // Homebrew keeps /opt/homebrew/bin/node pointed at the current keg, so
+    // embedding it survives a `brew upgrade node` that removes the old Cellar.
+    const realpath = (path: string): string => {
+      if (path === cellar || path === brewSymlink) return cellar;
+      throw new Error(`ENOENT: ${path}`);
+    };
+    expect(
+      stableLauncherNodePath({ execPath: cellar, candidates: [brewSymlink], realpath })
+    ).toBe(brewSymlink);
+  });
+
+  it("ignores launchers that resolve to a different runtime", () => {
+    const systemNode = "/usr/bin/node";
+    const realpath = (path: string): string => {
+      if (path === cellar) return cellar;
+      if (path === systemNode) return "/usr/bin/node18"; // unrelated binary
+      throw new Error(`ENOENT: ${path}`);
+    };
+    expect(
+      stableLauncherNodePath({ execPath: cellar, candidates: [systemNode], realpath })
+    ).toBe(cellar);
+  });
+
+  it("falls back to execPath when no stable launcher matches (e.g. nvm/fnm)", () => {
+    const nvm = "/Users/dev/.nvm/versions/node/v26.4.0/bin/node";
+    const realpath = (path: string): string => {
+      if (path === nvm) return nvm;
+      throw new Error(`ENOENT: ${path}`);
+    };
+    expect(
+      stableLauncherNodePath({ execPath: nvm, candidates: [brewSymlink], realpath })
+    ).toBe(nvm);
+  });
+
+  it("falls back to execPath when the running binary cannot be resolved", () => {
+    const realpath = (path: string): string => {
+      if (path === cellar) throw new Error("ENOENT");
+      return path;
+    };
+    expect(
+      stableLauncherNodePath({ execPath: cellar, candidates: [brewSymlink], realpath })
+    ).toBe(cellar);
   });
 });
