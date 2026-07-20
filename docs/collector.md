@@ -107,7 +107,7 @@ To read a specific OpenCode SQLite database:
 TRMNL_TOKEN_METER_OPENCODE_DB=/path/to/opencode.db npx trmnl-token-meter collect
 ```
 
-The OpenCode source reports provider `opencode` and source kind `opencode_sqlite`. It reads only normalized OpenCode `session` columns needed for model, timestamp, token totals, and stored session cost from the configured SQLite database. OpenCode costs come from `session.cost` instead of the local pricing catalog. It does not read messages, parts, titles, paths, directories, projects, account metadata, or diff storage.
+The OpenCode source reports provider `opencode` and source kind `opencode_sqlite`. It reads only the normalized usage fields on each assistant `message` row — model, per-message timestamp, token counts, and stored per-message cost — from the configured SQLite database, attributing usage to the day each message occurred rather than the session's creation date. OpenCode costs come from the message `cost` field instead of the local pricing catalog. It does not read OpenCode message or part text, titles, paths, directories, projects, account metadata, or diff storage.
 
 To read a specific Claude config or projects directory:
 
@@ -141,7 +141,7 @@ Disabled Pi collection is silent and does not create a missing-source warning.
 
 ## Cost Windows And Status
 
-Each collector run captures the local date once, then calculates today, last 7 days, last 14 days, last 30 days, and up to 15 daily rows using local-day boundaries. The upload includes combined totals plus source summaries for enabled providers found locally, currently Codex, OpenCode, and Claude. Codex and Claude cost estimates use the local catalog version included in the upload; OpenCode costs use the stored `session.cost` value.
+Each collector run captures the local date once, then calculates today, last 7 days, last 14 days, last 30 days, and up to 15 daily rows using local-day boundaries. The upload includes combined totals plus source summaries for enabled providers found locally, currently Codex, OpenCode, and Claude. Codex and Claude cost estimates use the local catalog version included in the upload; OpenCode costs use the stored per-message `cost` value.
 
 Every upload includes the CLI version, supported providers, locally enabled
 providers, and provider availability statuses. The backend response from

@@ -376,7 +376,7 @@ To read a specific OpenCode SQLite database:
 TRMNL_TOKEN_METER_OPENCODE_DB=/path/to/opencode.db npx trmnl-token-meter collect
 ```
 
-The OpenCode source reports provider `opencode` and source kind `opencode_sqlite`. The collector reads only normalized `session` columns needed for model, timestamp, token totals, and stored session cost; OpenCode costs come from `session.cost` instead of the local pricing catalog. It does not read OpenCode messages, parts, titles, paths, directories, projects, account metadata, or diff storage.
+The OpenCode source reports provider `opencode` and source kind `opencode_sqlite`. The collector reads only the normalized usage fields on each assistant `message` row — model, per-message timestamp, token counts, and stored per-message cost — so usage is attributed to the day each message occurred rather than the session's creation date. OpenCode costs come from the message `cost` field instead of the local pricing catalog. It does not read OpenCode message or part text, titles, paths, directories, projects, account metadata, or diff storage.
 
 To read a specific Claude config or projects directory:
 

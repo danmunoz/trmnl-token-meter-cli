@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { readOpenCodeSqliteSource } from "../src/cost-sources/opencode-sqlite.js";
+import { localDateKey } from "../src/cost-sources/jsonl.js";
 import { readPriorityEvidence } from "../src/cost-sources/priority-sqlite.js";
 import { scanLocalCostSources } from "../src/cost-scan.js";
 
@@ -34,20 +35,24 @@ const usageLine = (sessionId: string, timestamp = "2026-05-15T10:00:00.000Z") =>
     last_token_usage: { input_tokens: 100, cached_input_tokens: 10, output_tokens: 50 }
   });
 
-const createOpenCodeDb = async (
-  path: string,
-  rows: Array<{
-    id: string;
-    time_created: string;
-    model: string;
-    tokens_input: number;
-    tokens_cache_read: number;
-    tokens_cache_write: number;
-    tokens_output: number;
-    tokens_reasoning: number;
-    cost?: number;
-  }>
-) => {
+interface OpenCodeMessageFixture {
+  id: string;
+  session_id?: string;
+  time_created: string | number;
+  model: string;
+  providerID?: string;
+  tokens_input: number;
+  tokens_cache_read: number;
+  tokens_cache_write: number;
+  tokens_output: number;
+  tokens_reasoning: number;
+  cost?: number;
+}
+
+// OpenCode stores per-turn usage on `message` rows (role="assistant") with a JSON
+// `data` blob. The `session` table below carries canary columns to prove the reader
+// never falls back to session-level rollups (which are misdated and often empty).
+const createOpenCodeDb = async (path: string, messages: OpenCodeMessageFixture[]) => {
   const sqlite = (await import("node:sqlite")) as {
     DatabaseSync: new (path: string) => {
       exec(sql: string): void;
@@ -62,61 +67,51 @@ const createOpenCodeDb = async (
     create table session (
       id text primary key,
       time_created text,
-      model text,
-      tokens_input integer,
-      tokens_cache_read integer,
-      tokens_cache_write integer,
-      tokens_output integer,
-      tokens_reasoning integer,
-      cost real,
       title text,
       directory text,
-      path text,
-      project text,
-      account text,
-      message text,
-      part text
+      tokens_input integer
     )
   `);
-  const statement = db.prepare(`
-    insert into session (
-      id,
-      time_created,
-      model,
-      tokens_input,
-      tokens_cache_read,
-      tokens_cache_write,
-      tokens_output,
-      tokens_reasoning,
-      cost,
-      title,
-      directory,
-      path,
-      project,
-      account,
-      message,
-      part
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  db.prepare(
+    `insert into session (id, time_created, title, directory, tokens_input) values (?, ?, ?, ?, ?)`
+  ).run(
+    "canary-session",
+    "2026-05-15T00:00:00.000Z",
+    "CANARY_TITLE_DO_NOT_UPLOAD",
+    "CANARY_DIRECTORY_DO_NOT_UPLOAD",
+    999_999
+  );
+  db.exec(`
+    create table message (
+      id text primary key,
+      session_id text,
+      time_created integer,
+      time_updated integer,
+      data text
+    )
   `);
-  for (const row of rows) {
-    statement.run(
-      row.id,
-      row.time_created,
-      row.model,
-      row.tokens_input,
-      row.tokens_cache_read,
-      row.tokens_cache_write,
-      row.tokens_output,
-      row.tokens_reasoning,
-      row.cost ?? null,
-      "CANARY_TITLE_DO_NOT_UPLOAD",
-      "CANARY_DIRECTORY_DO_NOT_UPLOAD",
-      "CANARY_PATH_DO_NOT_UPLOAD",
-      "CANARY_PROJECT_DO_NOT_UPLOAD",
-      "CANARY_ACCOUNT_DO_NOT_UPLOAD",
-      "CANARY_MESSAGE_DO_NOT_UPLOAD",
-      "CANARY_PART_DO_NOT_UPLOAD"
-    );
+  const statement = db.prepare(
+    `insert into message (id, session_id, time_created, time_updated, data) values (?, ?, ?, ?, ?)`
+  );
+  for (const message of messages) {
+    const created =
+      typeof message.time_created === "number" ? message.time_created : Date.parse(message.time_created);
+    const data = {
+      role: "assistant",
+      modelID: message.model,
+      providerID: message.providerID ?? "openai",
+      path: "CANARY_PATH_DO_NOT_UPLOAD",
+      summary: "CANARY_SUMMARY_DO_NOT_UPLOAD",
+      time: { created },
+      ...(message.cost === undefined ? {} : { cost: message.cost }),
+      tokens: {
+        input: message.tokens_input,
+        output: message.tokens_output,
+        reasoning: message.tokens_reasoning,
+        cache: { read: message.tokens_cache_read, write: message.tokens_cache_write }
+      }
+    };
+    statement.run(message.id, message.session_id ?? "session-1", created, created, JSON.stringify(data));
   }
   db.close();
 };
@@ -451,7 +446,7 @@ describe("local cost sources", () => {
     await writeJsonl(join(root, "sessions", "active.jsonl"), [usageLine("active")]);
     await createOpenCodeDb(opencodeDb, [
       {
-        id: "opencode-session-1",
+        id: "opencode-message-1",
         time_created: "2026-05-15T11:00:00.000Z",
         model: "openai/gpt-5",
         tokens_input: 120,
@@ -462,13 +457,9 @@ describe("local cost sources", () => {
         cost: 0.123456
       },
       {
-        id: "opencode-session-2",
+        id: "opencode-message-2",
         time_created: "2026-05-15T12:00:00.000Z",
-        model: JSON.stringify({
-          providerID: "openai",
-          modelID: "gpt-5-mini",
-          name: "CANARY_RAW_MODEL_JSON_DO_NOT_UPLOAD"
-        }),
+        model: "gpt-5-mini",
         tokens_input: 80,
         tokens_cache_read: 3,
         tokens_cache_write: 5,
@@ -486,10 +477,12 @@ describe("local cost sources", () => {
       })
     );
 
-    const opencode = result.records.filter((record) => record.source_provider === "opencode");
+    const opencode = result.records
+      .filter((record) => record.source_provider === "opencode")
+      .sort((a, b) => a.dedupe_key.localeCompare(b.dedupe_key));
     expect(opencode).toHaveLength(2);
     expect(opencode[0]).toMatchObject({
-      dedupe_key: "opencode:opencode-session-1",
+      dedupe_key: "opencode:opencode-message-1",
       source_provider: "opencode",
       source_kind: "opencode_sqlite",
       input_tokens: 120,
@@ -503,6 +496,7 @@ describe("local cost sources", () => {
       priority_tier: "base"
     });
     expect(opencode[1]).toMatchObject({
+      dedupe_key: "opencode:opencode-message-2",
       model: "gpt-5-mini",
       model_alias: "gpt-5-mini",
       input_tokens: 80,
@@ -522,11 +516,76 @@ describe("local cost sources", () => {
     expect(text).not.toContain("CANARY_TITLE_DO_NOT_UPLOAD");
     expect(text).not.toContain("CANARY_DIRECTORY_DO_NOT_UPLOAD");
     expect(text).not.toContain("CANARY_PATH_DO_NOT_UPLOAD");
-    expect(text).not.toContain("CANARY_PROJECT_DO_NOT_UPLOAD");
-    expect(text).not.toContain("CANARY_ACCOUNT_DO_NOT_UPLOAD");
-    expect(text).not.toContain("CANARY_MESSAGE_DO_NOT_UPLOAD");
-    expect(text).not.toContain("CANARY_PART_DO_NOT_UPLOAD");
-    expect(text).not.toContain("CANARY_RAW_MODEL_JSON_DO_NOT_UPLOAD");
+    expect(text).not.toContain("CANARY_SUMMARY_DO_NOT_UPLOAD");
+  });
+
+  it("attributes OpenCode usage to each message's date, not the session creation date", async () => {
+    const root = await makeTempRoot();
+    const opencodeRoot = await makeTempRoot();
+    const opencodeDb = join(opencodeRoot, "opencode.db");
+    await writeJsonl(join(root, "sessions", "active.jsonl"), [usageLine("active")]);
+    // A single long-lived session (created day one) reused across three days.
+    await createOpenCodeDb(opencodeDb, [
+      {
+        id: "msg-day1",
+        session_id: "long-session",
+        time_created: "2026-05-10T12:00:00.000Z",
+        model: "gpt-5",
+        tokens_input: 100,
+        tokens_cache_read: 0,
+        tokens_cache_write: 0,
+        tokens_output: 10,
+        tokens_reasoning: 0
+      },
+      {
+        id: "msg-day3",
+        session_id: "long-session",
+        time_created: "2026-05-12T12:00:00.000Z",
+        model: "gpt-5",
+        tokens_input: 200,
+        tokens_cache_read: 0,
+        tokens_cache_write: 0,
+        tokens_output: 20,
+        tokens_reasoning: 0
+      },
+      {
+        id: "msg-day11",
+        session_id: "long-session",
+        time_created: "2026-05-20T12:00:00.000Z",
+        model: "gpt-5",
+        tokens_input: 300,
+        tokens_cache_read: 0,
+        tokens_cache_write: 0,
+        tokens_output: 30,
+        tokens_reasoning: 0
+      }
+    ]);
+
+    const result = await scanLocalCostSources(
+      loadTestConfig({
+        CODEX_HOME: root,
+        TRMNL_TOKEN_METER_OPENCODE_DB: opencodeDb,
+        TRMNL_TOKEN_METER_ENABLED_PROVIDERS: "codex,opencode"
+      })
+    );
+
+    const opencode = result.records
+      .filter((record) => record.source_provider === "opencode")
+      .sort((a, b) => a.occurred_at.getTime() - b.occurred_at.getTime());
+    expect(opencode.map((record) => record.dedupe_key)).toEqual([
+      "opencode:msg-day1",
+      "opencode:msg-day3",
+      "opencode:msg-day11"
+    ]);
+    // Each record is dated to its own message, spanning three distinct days —
+    // not lumped onto the session's creation date.
+    expect(opencode.map((record) => record.local_date)).toEqual([
+      localDateKey(new Date("2026-05-10T12:00:00.000Z")),
+      localDateKey(new Date("2026-05-12T12:00:00.000Z")),
+      localDateKey(new Date("2026-05-20T12:00:00.000Z"))
+    ]);
+    expect(new Set(opencode.map((record) => record.local_date)).size).toBe(3);
+    expect(opencode.map((record) => record.input_tokens)).toEqual([100, 200, 300]);
   });
 
   it("does not read disabled OpenCode or Claude providers and returns disabled source statuses", async () => {
@@ -536,7 +595,7 @@ describe("local cost sources", () => {
     const opencodeDb = join(opencodeRoot, "opencode.db");
     await createOpenCodeDb(opencodeDb, [
       {
-        id: "opencode-session-1",
+        id: "opencode-message-1",
         time_created: "2026-05-15T11:00:00.000Z",
         model: "openai/gpt-5",
         tokens_input: 100,
@@ -608,8 +667,7 @@ describe("local cost sources", () => {
       };
     };
     const db = new sqlite.DatabaseSync(malformedDb);
-    db.exec("drop table session");
-    db.exec("create table session (title text)");
+    db.exec("drop table message");
     db.close();
 
     const missing = await readOpenCodeSqliteSource(loadConfig({ TRMNL_TOKEN_METER_OPENCODE_DB: join(root, "missing.db") }));
