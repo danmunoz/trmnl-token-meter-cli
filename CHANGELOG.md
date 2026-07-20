@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.1...trmnl-token-meter-0.4.2) (2026-07-20)
+
+
+### Bug Fixes
+
+* **opencode:** attribute usage per message instead of session ([cf5bac5](https://github.com/danmunoz/trmnl-token-meter-cli/commit/cf5bac53177283638aca76b062464edf0021d7fd))
+* **opencode:** attribute usage per message instead of session ([8fdb368](https://github.com/danmunoz/trmnl-token-meter-cli/commit/8fdb3688a61da5d8d44cc6345f5aef38fef72376))
+
 ## [0.4.1](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.0...trmnl-token-meter-0.4.1) (2026-07-18)
 
 
