@@ -203,16 +203,12 @@ describe("collector CLI", () => {
     const db = new sqliteModule.DatabaseSync(opencodeDb);
     try {
       db.exec(`
-        create table if not exists session (
+        create table if not exists message (
           id text primary key,
-          time_created text,
-          model text,
-          tokens_input integer,
-          tokens_cache_read integer,
-          tokens_cache_write integer,
-          tokens_output integer,
-          tokens_reasoning integer,
-          cost real
+          session_id text,
+          time_created integer,
+          time_updated integer,
+          data text
         )
       `);
     } finally {

@@ -11,16 +11,15 @@ interface OpenCodeSqliteResult extends JsonlSourceResult {
   status: LocalUsageSourceStatus;
 }
 
-interface OpenCodeSessionRow {
+// OpenCode records usage per assistant message in the `message` table. Each row
+// carries a JSON `data` blob with the model, per-turn token counts, and cost.
+// We attribute usage to the message timestamp — not the session's creation date —
+// because OpenCode sessions are long-lived and reused across many days, and older
+// sessions leave the session-level rollup columns empty.
+interface OpenCodeMessageRow {
   id: unknown;
   time_created: unknown;
-  model: unknown;
-  tokens_input: unknown;
-  tokens_cache_read: unknown;
-  tokens_cache_write: unknown;
-  tokens_output: unknown;
-  tokens_reasoning: unknown;
-  cost: unknown;
+  data: unknown;
 }
 
 type DatabaseSyncConstructor = new (
@@ -68,26 +67,19 @@ const dateValue = (value: unknown): Date | null => {
 const objectValue = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
-function modelCandidateFromJson(raw: string): string | null {
+const parseJsonObject = (raw: unknown): Record<string, unknown> | null => {
+  const text = stringValue(raw);
+  if (!text) return objectValue(raw);
   try {
-    const object = objectValue(JSON.parse(raw));
-    if (!object) return null;
-    return (
-      stringValue(object.modelID) ??
-      stringValue(object.modelId) ??
-      stringValue(object.model_id) ??
-      stringValue(object.id) ??
-      stringValue(object.model)
-    );
+    return objectValue(JSON.parse(text));
   } catch {
     return null;
   }
-}
+};
 
 function normalizeOpenCodeModel(raw: unknown): string {
-  const text = stringValue(raw);
-  if (!text) return "unknown";
-  const candidate = modelCandidateFromJson(text) ?? text;
+  const candidate = stringValue(raw);
+  if (!candidate) return "unknown";
   const withoutProvider = candidate.includes("/") ? candidate.split("/").at(-1) ?? candidate : candidate;
   const priced = findPricingModel(withoutProvider);
   if (priced) return priced.id;
@@ -95,20 +87,30 @@ function normalizeOpenCodeModel(raw: unknown): string {
   return /^[a-z0-9._:-]+$/.test(normalized) ? normalized : "unknown";
 }
 
-function recordFromRow(row: OpenCodeSessionRow): SessionUsageRecord | null {
+// Only the fields below are ever read out of the message blob. Raw prompt/response
+// text, file paths, titles, and other context stay local and never reach a record.
+function recordFromMessage(row: OpenCodeMessageRow): SessionUsageRecord | null {
   const id = stringValue(row.id);
-  const occurredAt = dateValue(row.time_created);
-  if (!id || !occurredAt) return null;
+  const data = parseJsonObject(row.data);
+  if (!id || !data) return null;
+  if (stringValue(data.role) !== "assistant") return null;
 
-  const input = numberValue(row.tokens_input);
-  const cacheRead = numberValue(row.tokens_cache_read);
-  const cacheWrite = numberValue(row.tokens_cache_write);
-  const output = numberValue(row.tokens_output);
-  const reasoning = numberValue(row.tokens_reasoning);
-  const observedCost = costValue(row.cost);
+  const tokens = objectValue(data.tokens);
+  if (!tokens) return null;
+  const cache = objectValue(tokens.cache) ?? {};
+
+  const input = numberValue(tokens.input);
+  const cacheRead = numberValue(cache.read);
+  const cacheWrite = numberValue(cache.write);
+  const output = numberValue(tokens.output);
+  const reasoning = numberValue(tokens.reasoning);
   if (input === 0 && cacheRead === 0 && cacheWrite === 0 && output === 0 && reasoning === 0) return null;
 
-  const model = normalizeOpenCodeModel(row.model);
+  const occurredAt = dateValue(row.time_created) ?? dateValue(objectValue(data.time)?.created);
+  if (!occurredAt) return null;
+
+  const observedCost = costValue(data.cost);
+  const model = normalizeOpenCodeModel(data.modelID ?? data.model);
   return {
     dedupe_key: `opencode:${id}`,
     source_provider: "opencode",
@@ -133,23 +135,16 @@ async function readRows(sqlitePath: string): Promise<SessionUsageRecord[]> {
   const { DatabaseSync } = await importSqlite();
   const database = new DatabaseSync(sqlitePath, { readOnly: true });
   try {
-    const rows = database
-      .prepare(`
-        select
-          id,
-          time_created,
-          model,
-          tokens_input,
-          tokens_cache_read,
-          tokens_cache_write,
-          tokens_output,
-          tokens_reasoning,
-          cost
-        from session
-      `)
-      .all();
+    const hasMessageTable =
+      database
+        .prepare("select name from sqlite_master where type = 'table' and name = 'message'")
+        .all().length > 0;
+    if (!hasMessageTable) {
+      throw new Error("opencode schema missing message table");
+    }
+    const rows = database.prepare("select id, time_created, data from message").all();
     return rows.flatMap((row) => {
-      const record = recordFromRow(row as unknown as OpenCodeSessionRow);
+      const record = recordFromMessage(row as unknown as OpenCodeMessageRow);
       return record ? [record] : [];
     });
   } finally {

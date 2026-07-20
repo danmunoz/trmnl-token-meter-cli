@@ -43,44 +43,31 @@ const createOpenCodeDb = async (
   };
   const db = new sqlite.DatabaseSync(path);
   db.exec(`
-    create table session (
+    create table message (
       id text primary key,
-      time_created text,
-      model text,
-      tokens_input integer,
-      tokens_cache_read integer,
-      tokens_cache_write integer,
-      tokens_output integer,
-      tokens_reasoning integer,
-      cost real
+      session_id text,
+      time_created integer,
+      time_updated integer,
+      data text
     )
   `);
-  const statement = db.prepare(
-    `
-    insert into session (
-      id,
-      time_created,
-      model,
-      tokens_input,
-      tokens_cache_read,
-      tokens_cache_write,
-      tokens_output,
-      tokens_reasoning,
-      cost
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  );
-  statement.run(
-    row.id,
-    row.time_created,
-    row.model,
-    row.tokens_input,
-    row.tokens_cache_read,
-    row.tokens_cache_write,
-    row.tokens_output,
-    row.tokens_reasoning,
-    row.cost ?? null
-  );
+  const created = Date.parse(row.time_created);
+  const data = {
+    role: "assistant",
+    modelID: row.model,
+    providerID: "openai",
+    time: { created },
+    ...(row.cost === undefined ? {} : { cost: row.cost }),
+    tokens: {
+      input: row.tokens_input,
+      output: row.tokens_output,
+      reasoning: row.tokens_reasoning,
+      cache: { read: row.tokens_cache_read, write: row.tokens_cache_write }
+    }
+  };
+  db.prepare(
+    `insert into message (id, session_id, time_created, time_updated, data) values (?, ?, ?, ?, ?)`
+  ).run(row.id, "session-1", created, created, JSON.stringify(data));
   db.close();
 };
 

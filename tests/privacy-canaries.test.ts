@@ -23,28 +23,35 @@ const createOpenCodeDb = async (path: string) => {
   };
   const db = new sqlite.DatabaseSync(path);
   db.exec(`
-    create table session (
+    create table message (
       id text primary key,
-      time_created text,
-      model text,
-      tokens_input integer,
-      tokens_cache_read integer,
-      tokens_cache_write integer,
-      tokens_output integer,
-      tokens_reasoning integer,
-      cost real,
-      title text,
-      directory text,
-      path text,
-      project text,
-      account text,
-      message text,
-      part text
+      session_id text,
+      time_created integer,
+      time_updated integer,
+      data text
     )
   `);
-  db.exec(
-    `insert into session values ('opencode-session-disabled', '2026-05-15T11:00:00.000Z', 'openai/gpt-5', 100, 50, 10, 20, 5, 0.1, 'CANARY_TITLE_DO_NOT_UPLOAD', 'CANARY_DIRECTORY_DO_NOT_UPLOAD', 'CANARY_PATH_DO_NOT_UPLOAD', 'CANARY_PROJECT_DO_NOT_UPLOAD', 'CANARY_ACCOUNT_DO_NOT_UPLOAD', 'CANARY_MESSAGE_DO_NOT_UPLOAD', 'CANARY_PART_DO_NOT_UPLOAD')`
-  );
+  const created = Date.parse("2026-05-15T11:00:00.000Z");
+  // The message `data` blob mixes real usage numbers with raw local context that
+  // must never be extracted into a record or uploaded.
+  const data = {
+    role: "assistant",
+    modelID: "openai/gpt-5",
+    providerID: "openai",
+    title: "CANARY_TITLE_DO_NOT_UPLOAD",
+    directory: "CANARY_DIRECTORY_DO_NOT_UPLOAD",
+    path: "CANARY_PATH_DO_NOT_UPLOAD",
+    project: "CANARY_PROJECT_DO_NOT_UPLOAD",
+    account: "CANARY_ACCOUNT_DO_NOT_UPLOAD",
+    summary: "CANARY_MESSAGE_DO_NOT_UPLOAD",
+    text: "CANARY_PART_DO_NOT_UPLOAD",
+    time: { created },
+    cost: 0.1,
+    tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 50, write: 10 } }
+  };
+  db.prepare(
+    `insert into message (id, session_id, time_created, time_updated, data) values (?, ?, ?, ?, ?)`
+  ).run("opencode-message-canary", "session-1", created, created, JSON.stringify(data));
   db.close();
 };
 
@@ -88,7 +95,7 @@ describe("privacy canaries", () => {
       CODEX_HOME: fixtureRoot,
       TRMNL_TOKEN_METER_OPENCODE_DB: opencodeDb,
       TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: claudeRoot,
-      TRMNL_TOKEN_METER_ENABLED_PROVIDERS: "codex"
+      TRMNL_TOKEN_METER_ENABLED_PROVIDERS: "codex,opencode"
     });
     const result = await scanLocalCostSources(config);
     const snapshot = buildAggregate(result.records, {

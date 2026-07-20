@@ -34,7 +34,7 @@ The upload includes combined totals plus optional `source_summaries` for enabled
 providers found locally. The supported providers are `codex`, `opencode`, and
 `claude`. Public usage sections expose total tokens and estimated cost only;
 provider-specific token lanes stay local for cost calculation. OpenCode cost
-totals use the stored `session.cost` value from the local OpenCode database.
+totals use the stored per-message `cost` value from the local OpenCode database.
 
 Source enablement is owned by the backend web configuration. A newer CLI release
 can report that new providers are supported and locally available, but it does
