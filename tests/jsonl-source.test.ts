@@ -30,7 +30,7 @@ describe("Codex JSONL source", () => {
     expect(result.records).toContainEqual(
       expect.objectContaining({
         input_tokens: 25,
-        cached_input_tokens: 25,
+        cached_input_tokens: 40,
         output_tokens: 10
       })
     );

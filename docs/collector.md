@@ -127,6 +127,18 @@ TRMNL_TOKEN_METER_CLAUDE_PROJECTS_HOME=/path/to/claude/projects npx trmnl-token-
 
 The collector does not upload raw lines, prompts, responses, file paths, commands, diffs, SQL rows, OpenCode session content, Claude transcript content, Pi session content, or repository names.
 
+Codex subagent rollouts retain their own session identity. A parent baseline is removed only when
+the rollout's first cumulative counter contains that parent total; fresh subagent counters remain
+independent even when their local metadata links back to a parent thread.
+
+For legacy compact subagent rollouts, copied history ends at the first confirmed child-turn
+boundary. The boundary can be explicit, embedded after ancestor metadata, or locally proven when
+the first owned cumulative total minus its per-turn usage equals the pre-boundary total.
+
+When Codex records both per-turn and cumulative token counters, the collector tracks raw and
+counted totals separately. It suppresses exact replays, uses a monotonic watermark, and contains
+interleaved counter regressions so lineage switches cannot replay an already-counted gap.
+
 For disabled providers, the collector performs only a content-free availability
 check and uploads provider status metadata such as `available`, `missing`,
 `unreadable`, or `malformed`. That status lets the backend show source controls

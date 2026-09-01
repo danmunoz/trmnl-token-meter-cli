@@ -148,7 +148,7 @@ Compact representative example:
     "version": "0.1.0",
     "source": "codexbar-local-cost",
     "codex_home": "default",
-    "cost_engine_version": "2026-07-12.codexbar-parity",
+    "cost_engine_version": "2026-09-01.codexbar-counter-parity",
     "supported_providers": ["codex", "opencode", "claude"],
     "enabled_providers": ["codex"],
     "provider_statuses": [

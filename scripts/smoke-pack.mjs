@@ -37,7 +37,12 @@ async function main() {
     env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" }
   });
   const packResult = JSON.parse(stdout);
-  const tarball = packResult[0]?.filename;
+  const packEntries = Array.isArray(packResult)
+    ? packResult
+    : packResult && typeof packResult === "object"
+      ? Object.values(packResult)
+      : [];
+  const tarball = packEntries[0]?.filename;
   if (typeof tarball !== "string" || !tarball.endsWith(".tgz")) {
     throw new Error("npm pack did not return a tarball filename");
   }

@@ -5,7 +5,7 @@ import { pricingCatalogVersion } from "./models.js";
 // aggregate cost calculation. CodexBar is MIT licensed; keep this attribution
 // with any code substantially copied from a reviewed CodexBar source revision.
 // Attribution: CodexBar, MIT license.
-// Source reference: https://github.com/search?q=CodexBar+cost&type=repositories
+// Pricing source reference: https://github.com/steipete/CodexBar/blob/5351013a211f90df83b91d7ec2b788ff1c35c1f3/Sources/CodexBarCore/Vendored/CostUsage/CostUsagePricing.swift
 
 export const codexBarPricingCatalogVersion = pricingCatalogVersion;
 

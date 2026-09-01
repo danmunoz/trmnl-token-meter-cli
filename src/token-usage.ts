@@ -9,6 +9,7 @@ interface NormalizeResult {
 export interface TokenUsageContext {
   currentModel?: string;
   sessionId?: string;
+  sessionIdentity?: "independent_subagent";
   currentTurnId?: string;
   branchId?: string;
   parentId?: string;
@@ -19,8 +20,11 @@ export function mergeTokenUsageContext(
   target: TokenUsageContext,
   update: TokenUsageContext
 ): void {
-  if (update.currentModel) target.currentModel = update.currentModel;
+  if ("currentModel" in update) target.currentModel = update.currentModel;
   if (update.sessionId && !target.sessionId) target.sessionId = update.sessionId;
+  if (update.sessionIdentity === "independent_subagent") {
+    target.sessionIdentity = update.sessionIdentity;
+  }
   if (update.currentTurnId) target.currentTurnId = update.currentTurnId;
   if (update.branchId && !target.branchId) target.branchId = update.branchId;
   if (update.parentId && !target.parentId) target.parentId = update.parentId;
@@ -55,20 +59,20 @@ function normalizeUsage(raw: Record<string, unknown>): TokenUsage {
   const input = numberField(
     raw.input_tokens ?? raw.inputTokens ?? raw.prompt_tokens ?? raw.promptTokens
   );
-  const cached = numberField(
-    raw.cached_input_tokens ??
-      raw.cachedInputTokens ??
-      raw.cache_read_input_tokens ??
-      raw.cacheReadInputTokens ??
-      raw.cached_tokens ??
-      raw.cachedTokens
+  const cached = Math.max(
+    numberField(raw.cached_input_tokens),
+    numberField(raw.cachedInputTokens),
+    numberField(raw.cache_read_input_tokens),
+    numberField(raw.cacheReadInputTokens),
+    numberField(raw.cached_tokens),
+    numberField(raw.cachedTokens)
   );
   const output = numberField(
     raw.output_tokens ?? raw.outputTokens ?? raw.completion_tokens ?? raw.completionTokens
   );
   return {
     input_tokens: input,
-    cached_input_tokens: Math.min(cached, input),
+    cached_input_tokens: cached,
     output_tokens: output
   };
 }
@@ -76,6 +80,38 @@ function normalizeUsage(raw: Record<string, unknown>): TokenUsage {
 function sessionContext(object: Record<string, unknown>): TokenUsageContext | undefined {
   if (object.type !== "session_meta") return undefined;
   const payload = objectField(object.payload);
+  const source = objectField(payload?.source);
+  const threadSource = stringField(
+    payload?.thread_source ?? payload?.threadSource ?? payload?.source,
+    ""
+  ).toLowerCase();
+  const nestedSubagent = source?.subagent;
+  const isSubagent =
+    threadSource === "subagent" ||
+    typeof nestedSubagent === "string" ||
+    objectField(nestedSubagent) !== undefined;
+  const ownThreadId = stringField(payload?.id, "");
+  if (isSubagent && ownThreadId) {
+    const parentId = stringField(
+      payload?.forked_from_id ??
+        payload?.forkedFromId ??
+        payload?.parent_session_id ??
+        payload?.parentSessionId ??
+        payload?.parent_id ??
+        payload?.parentId ??
+        object.parent_id ??
+        object.parentId,
+      ""
+    );
+    return {
+      sessionId: ownThreadId,
+      sessionIdentity: "independent_subagent",
+      parentId,
+      forkTimestamp: parentId
+        ? stringField(payload?.timestamp ?? object.timestamp ?? object.created_at ?? object.createdAt, "")
+        : ""
+    };
+  }
   const parentId = stringField(
     payload?.forked_from_id ??
       payload?.forkedFromId ??
@@ -109,8 +145,15 @@ function turnContext(object: Record<string, unknown>): TokenUsageContext | undef
   if (object.type !== "turn_context") return undefined;
   const payload = objectField(object.payload);
   const info = objectField(payload?.info);
-  const currentModel = stringField(payload?.model ?? info?.model, "");
-  return currentModel ? { currentModel } : undefined;
+  const candidates = [payload?.model, payload?.model_name, info?.model, info?.model_name];
+  let sawModelField = false;
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    sawModelField = true;
+    const currentModel = candidate.trim();
+    if (currentModel) return { currentModel };
+  }
+  return sawModelField ? { currentModel: "" } : undefined;
 }
 
 function taskStartedContext(object: Record<string, unknown>): TokenUsageContext | undefined {
@@ -149,19 +192,28 @@ export function normalizeTokenUsageRecord(
     data?.lastTokenUsage ??
     object.last_token_usage ??
     object.lastTokenUsage;
-  const usage = hasLastUsage ?? hasTotalUsage ?? data?.token_usage ?? data?.tokenUsage ?? data?.usage ?? object.token_usage ?? object.usage;
+  const totalUsage = objectField(hasTotalUsage);
+  const lastUsage = objectField(hasLastUsage);
+  const usage =
+    lastUsage ??
+    totalUsage ??
+    objectField(data?.token_usage ?? data?.tokenUsage ?? data?.usage ?? object.token_usage ?? object.usage);
 
-  if (!usage || typeof usage !== "object") return { malformed: false };
-  const usageObject = usage as Record<string, unknown>;
+  if (!usage) return { malformed: false };
+  const usageObject = usage;
   const timestampValue = object.timestamp ?? object.created_at ?? object.createdAt ?? object.time;
   const timestamp = new Date(typeof timestampValue === "string" ? timestampValue : Date.now());
   if (Number.isNaN(timestamp.getTime())) return { malformed: true };
 
   const tokenUsage = normalizeUsage(usageObject);
+  const cumulativeUsage = totalUsage ? normalizeUsage(totalUsage) : undefined;
   const hasUsage =
     tokenUsage.input_tokens > 0 ||
     tokenUsage.cached_input_tokens > 0 ||
-    tokenUsage.output_tokens > 0;
+    tokenUsage.output_tokens > 0 ||
+    cumulativeUsage?.input_tokens ||
+    cumulativeUsage?.cached_input_tokens ||
+    cumulativeUsage?.output_tokens;
   if (!hasUsage) return { malformed: false };
 
   const event: UsageEvent = {
@@ -182,8 +234,9 @@ export function normalizeTokenUsageRecord(
       object.session_id ?? object.sessionId ?? object.conversation_id ?? data?.session_id ?? data?.sessionId ?? data?.conversation_id ?? context.sessionId,
       "unknown"
     ),
-    record_kind: hasLastUsage ? "delta" : hasTotalUsage ? "cumulative" : "delta"
+    record_kind: lastUsage ? "delta" : totalUsage ? "cumulative" : "delta"
   };
+  if (cumulativeUsage) event.cumulative_usage = cumulativeUsage;
   event.long_context =
     booleanOrUnknown(
       usageObject.long_context ??
