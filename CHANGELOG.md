@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.2...trmnl-token-meter-0.4.3) (2026-09-01)
+
+
+### Bug Fixes
+
+* repair stale background service launchers ([f05924e](https://github.com/danmunoz/trmnl-token-meter-cli/commit/f05924efa6986867fca57a2a6b06b6cfd969755c))
+
 ## [0.4.2](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.1...trmnl-token-meter-0.4.2) (2026-07-20)
 
 
