@@ -100,6 +100,7 @@ interface ParsedUsageFile {
   parentId?: string;
   forkTimestamp?: string;
   snapshots: UsageSnapshot[];
+  ownedSuffixBaseline?: UsageTotals;
 }
 
 function addTotals(left: UsageTotals, right: UsageTotals): UsageTotals {
@@ -130,14 +131,146 @@ function hasUsage(event: UsageEvent): boolean {
   return event.input_tokens > 0 || event.cached_input_tokens > 0 || event.output_tokens > 0;
 }
 
+function totalsEqual(left: UsageTotals, right: UsageTotals): boolean {
+  return (
+    left.input_tokens === right.input_tokens &&
+    left.cached_input_tokens === right.cached_input_tokens &&
+    left.output_tokens === right.output_tokens
+  );
+}
+
+function totalsAtLeast(left: UsageTotals, right: UsageTotals): boolean {
+  return (
+    left.input_tokens >= right.input_tokens &&
+    left.cached_input_tokens >= right.cached_input_tokens &&
+    left.output_tokens >= right.output_tokens
+  );
+}
+
+interface SubagentOwnedSuffix {
+  startLine: number;
+  explicitHistoryBoundary: boolean;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isSubagentPayload(payload: Record<string, unknown> | undefined): boolean {
+  const source = payload?.source;
+  const nestedSubagent =
+    source && typeof source === "object"
+      ? (source as Record<string, unknown>).subagent
+      : undefined;
+  return (
+    stringValue(payload?.thread_source ?? payload?.threadSource ?? source)?.toLowerCase() ===
+      "subagent" ||
+    typeof nestedSubagent === "string" ||
+    (nestedSubagent !== null && typeof nestedSubagent === "object")
+  );
+}
+
+function parentIdFromPayload(payload: Record<string, unknown> | undefined): string | undefined {
+  return stringValue(
+    payload?.forked_from_id ??
+      payload?.forkedFromId ??
+      payload?.parent_session_id ??
+      payload?.parentSessionId ??
+      payload?.parent_id ??
+      payload?.parentId
+  );
+}
+
+function subagentOwnedSuffix(
+  records: readonly Record<string, unknown>[],
+  eventsByLine: readonly { event: UsageEvent; line: number }[]
+): SubagentOwnedSuffix | undefined {
+  const firstMetadata = records.find((record) => record.type === "session_meta");
+  const firstPayload = firstMetadata?.payload as Record<string, unknown> | undefined;
+  const leafId = stringValue(firstPayload?.id);
+  if (!isSubagentPayload(firstPayload) || !leafId) return undefined;
+
+  const leafPayloads = records
+    .filter((record) => record.type === "session_meta")
+    .map((record) => record.payload as Record<string, unknown> | undefined)
+    .filter((payload) => stringValue(payload?.id) === leafId);
+
+  const historyStartOrdinal = leafPayloads
+    .map((payload) => payload?.subagent_history_start_ordinal)
+    .find((value) => typeof value === "number" && Number.isInteger(value));
+  if (typeof historyStartOrdinal === "number" && Number.isInteger(historyStartOrdinal)) {
+    const startIndex = records.findIndex(
+      (record) => typeof record.ordinal === "number" && record.ordinal >= historyStartOrdinal
+    );
+    if (startIndex >= 0) return { startLine: startIndex + 1, explicitHistoryBoundary: true };
+  }
+
+  let lastEmbeddedMetadataLine = -1;
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record?.type !== "session_meta") continue;
+    const payload = record.payload as Record<string, unknown> | undefined;
+    const id = stringValue(payload?.id);
+    if (id && id !== leafId) lastEmbeddedMetadataLine = index + 1;
+  }
+  const parentId = leafPayloads.map(parentIdFromPayload).find((value) => value !== undefined);
+  const boundarySearchStart = lastEmbeddedMetadataLine >= 0 ? lastEmbeddedMetadataLine : 0;
+  for (let index = boundarySearchStart; index < records.length - 1; index += 1) {
+    const turnContext = records[index];
+    const communication = records[index + 1];
+    const payload = communication?.payload as Record<string, unknown> | undefined;
+    if (
+      turnContext?.type === "turn_context" &&
+      communication?.type === "inter_agent_communication_metadata" &&
+      payload?.trigger_turn === true
+    ) {
+      const startLine = index + 1;
+      if (lastEmbeddedMetadataLine >= 0) {
+        return { startLine, explicitHistoryBoundary: false };
+      }
+      if (!parentId) return undefined;
+
+      const baselineEvent = [...eventsByLine].reverse().find(
+        (item) => item.line < startLine && item.event.cumulative_usage
+      )?.event;
+      const firstOwnedEvent = eventsByLine.find(
+        (item) => item.line >= startLine && item.event.cumulative_usage
+      )?.event;
+      const baseline = baselineEvent?.cumulative_usage;
+      const total = firstOwnedEvent?.cumulative_usage;
+      if (!baseline || !total || firstOwnedEvent.record_kind !== "delta") return undefined;
+      const last = totalsFromEvent(firstOwnedEvent);
+      if (totalsAtLeast(total, last) && totalsEqual(subtractTotals(total, last), baseline)) {
+        return { startLine, explicitHistoryBoundary: false };
+      }
+      if (totalsEqual(total, last) && !totalsAtLeast(total, baseline)) {
+        return { startLine, explicitHistoryBoundary: false };
+      }
+      return undefined;
+    }
+    if (lastEmbeddedMetadataLine < 0 && turnContext?.type === "turn_context") return undefined;
+  }
+  return undefined;
+}
+
+function hasCopiedCumulativePrefix(events: readonly UsageEvent[], inherited: UsageTotals): boolean {
+  const firstCumulative = events.find(
+    (event) => event.cumulative_usage || event.record_kind === "cumulative"
+  );
+  if (!firstCumulative) return false;
+  const totals = firstCumulative.cumulative_usage ?? totalsFromEvent(firstCumulative);
+  return (
+    totals.input_tokens >= inherited.input_tokens &&
+    totals.cached_input_tokens >= inherited.cached_input_tokens &&
+    totals.output_tokens >= inherited.output_tokens
+  );
+}
+
 function snapshotsFromEvents(events: readonly UsageEvent[]): UsageSnapshot[] {
   const snapshots: UsageSnapshot[] = [];
   let current: UsageTotals = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 };
-  for (const event of [...events].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())) {
-    current =
-      event.record_kind === "cumulative"
-        ? totalsFromEvent(event)
-        : addTotals(current, totalsFromEvent(event));
+  for (const event of applyForkLedger([...events]).events) {
+    current = addTotals(current, totalsFromEvent(event));
     snapshots.push({ timestamp: event.timestamp, totals: current });
   }
   return snapshots;
@@ -167,12 +300,20 @@ function applyInheritedTotals(
   events: readonly UsageEvent[],
   inherited: UsageTotals | undefined
 ): UsageEvent[] {
-  if (!inherited) return [...events];
+  if (!inherited || !hasCopiedCumulativePrefix(events, inherited)) return [...events];
   let remaining: UsageTotals | undefined = inherited;
   return events.map((event) => {
-    if (event.record_kind === "cumulative") {
+    const cumulative =
+      event.cumulative_usage ?? (event.record_kind === "cumulative" ? totalsFromEvent(event) : undefined);
+    if (cumulative) {
       remaining = undefined;
-      return { ...event, ...subtractTotals(totalsFromEvent(event), inherited) };
+      const adjusted = subtractTotals(cumulative, inherited);
+      return {
+        ...event,
+        ...adjusted,
+        cumulative_usage: adjusted,
+        record_kind: "cumulative"
+      };
     }
     if (!remaining) return event;
 
@@ -214,17 +355,55 @@ export async function readJsonlUsageSource(
       if (!(await stat(file)).isFile()) continue;
       const fileEvents: UsageEvent[] = [];
       const context: TokenUsageContext = {};
+      const records: Record<string, unknown>[] = [];
+      const eventsByLine: Array<{ event: UsageEvent; line: number }> = [];
       for (const line of (await readFile(file, "utf8")).split(/\r?\n/)) {
         if (!line.trim()) continue;
         try {
-          const result = normalizeTokenUsageRecord(JSON.parse(line), context);
+          const record = JSON.parse(line) as Record<string, unknown>;
+          records.push(record);
+          const result = normalizeTokenUsageRecord(record, context);
           if (result.context) mergeTokenUsageContext(context, result.context);
-          if (result.event) fileEvents.push(result.event);
+          if (result.event) eventsByLine.push({ event: result.event, line: records.length });
           if (result.malformed) malformed += 1;
         } catch {
           malformed += 1;
         }
       }
+      const ownedSuffix = subagentOwnedSuffix(records, eventsByLine);
+      const ownedEvents = ownedSuffix
+        ? eventsByLine.filter((item) => item.line >= ownedSuffix.startLine)
+        : eventsByLine;
+      fileEvents.push(...ownedEvents.map((item) => item.event));
+      const baselineEvent = ownedSuffix
+        ? [...eventsByLine].reverse().find((item) => {
+            if (item.line >= ownedSuffix.startLine) return false;
+            return item.event.cumulative_usage || item.event.record_kind === "cumulative";
+          })?.event
+        : undefined;
+      const rawOwnedSuffixBaseline = baselineEvent
+        ? baselineEvent.cumulative_usage ?? totalsFromEvent(baselineEvent)
+        : undefined;
+      const firstOwnedEvent = ownedEvents.find(
+        (item) => item.event.cumulative_usage || item.event.record_kind === "cumulative"
+      )?.event;
+      const firstOwnedTotal = firstOwnedEvent?.cumulative_usage;
+      const inferredOwnedSuffixBaseline =
+        !rawOwnedSuffixBaseline &&
+        ownedSuffix?.explicitHistoryBoundary &&
+        firstOwnedEvent?.cumulative_usage &&
+        totalsAtLeast(firstOwnedEvent.cumulative_usage, totalsFromEvent(firstOwnedEvent))
+          ? subtractTotals(firstOwnedEvent.cumulative_usage, totalsFromEvent(firstOwnedEvent))
+          : undefined;
+      const initialOwnedSuffixBaseline = rawOwnedSuffixBaseline ?? inferredOwnedSuffixBaseline;
+      const ownedSuffixBaseline =
+        initialOwnedSuffixBaseline &&
+        firstOwnedEvent &&
+        firstOwnedTotal &&
+        totalsEqual(firstOwnedTotal, totalsFromEvent(firstOwnedEvent)) &&
+        !totalsAtLeast(firstOwnedTotal, initialOwnedSuffixBaseline)
+          ? { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 }
+          : initialOwnedSuffixBaseline;
       const sessionId =
         context.sessionId && context.sessionId !== "unknown"
           ? context.sessionId
@@ -234,7 +413,8 @@ export async function readJsonlUsageSource(
         snapshots: snapshotsFromEvents(fileEvents),
         ...(sessionId ? { sessionId } : {}),
         ...(context.parentId ? { parentId: context.parentId } : {}),
-        ...(context.forkTimestamp ? { forkTimestamp: context.forkTimestamp } : {})
+        ...(context.forkTimestamp ? { forkTimestamp: context.forkTimestamp } : {}),
+        ...(ownedSuffixBaseline ? { ownedSuffixBaseline } : {})
       });
     } catch {
       malformed += 1;
@@ -257,7 +437,7 @@ export async function readJsonlUsageSource(
       parsed.parentId ? snapshotsBySession.get(parsed.parentId) : undefined,
       parsed.forkTimestamp
     );
-    const adjustedEvents = applyInheritedTotals(parsed.events, inherited);
+    const adjustedEvents = applyInheritedTotals(parsed.events, parsed.ownedSuffixBaseline ?? inherited);
     const ledger = applyForkLedger(adjustedEvents);
     ambiguousForkCount += ledger.ambiguousForkCount;
     const nonZeroEvents = ledger.events.filter(hasUsage);

@@ -260,6 +260,141 @@ describe("local cost sources", () => {
     });
   });
 
+  it("counts Codex subagent threads independently of their parent metadata", async () => {
+    const root = await makeTempRoot();
+    await writeJsonl(join(root, "sessions", "2026", "05", "15", "a-parent.jsonl"), [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: "parent-thread" }
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-05-15T10:00:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            model: "gpt-5",
+            total_token_usage: {
+              input_tokens: 100,
+              cached_input_tokens: 10,
+              output_tokens: 50
+            }
+          }
+        }
+      })
+    ]);
+    await writeJsonl(join(root, "sessions", "2026", "05", "15", "b-subagent.jsonl"), [
+      JSON.stringify({
+        type: "session_meta",
+        payload: {
+          session_id: "parent-thread",
+          id: "subagent-thread",
+          forked_from_id: "parent-thread",
+          timestamp: "2026-05-15T10:00:30.000Z",
+          thread_source: "subagent"
+        }
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-05-15T10:01:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            model: "gpt-5",
+            total_token_usage: {
+              input_tokens: 20,
+              cached_input_tokens: 5,
+              output_tokens: 10
+            }
+          }
+        }
+      }),
+      JSON.stringify({
+        type: "session_meta",
+        payload: {
+          session_id: "parent-thread",
+          id: "parent-thread",
+          forked_from_id: "parent-thread",
+          timestamp: "2026-05-15T10:01:30.000Z",
+          thread_source: "user"
+        }
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-05-15T10:02:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            model: "gpt-5",
+            total_token_usage: {
+              input_tokens: 40,
+              cached_input_tokens: 8,
+              output_tokens: 20
+            }
+          }
+        }
+      })
+    ]);
+
+    const result = await scanLocalCostSources(loadTestConfig({ CODEX_HOME: root }));
+
+    expect(result.records).toHaveLength(3);
+    expect(result.records.reduce((total, item) => total + item.input_tokens + item.output_tokens, 0)).toBe(
+      210
+    );
+    expect(result.records.filter((item) => item.dedupe_key.startsWith("subagent-thread:"))).toHaveLength(2);
+    expect(result.warnings.find((item) => item.code === "duplicate_records_skipped")).toBeUndefined();
+  });
+
+  it("does not inherit parent totals when a subagent already has its own session id", async () => {
+    const root = await makeTempRoot();
+    await writeJsonl(join(root, "sessions", "2026", "05", "15", "parent.jsonl"), [
+      JSON.stringify({ type: "session_meta", payload: { id: "parent-thread" } }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-05-15T10:00:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            model: "gpt-5",
+            total_token_usage: { input_tokens: 100, cached_input_tokens: 10, output_tokens: 50 }
+          }
+        }
+      })
+    ]);
+    await writeJsonl(join(root, "sessions", "2026", "05", "15", "subagent.jsonl"), [
+      JSON.stringify({
+        type: "session_meta",
+        payload: {
+          sessionId: "subagent-thread",
+          id: "subagent-thread",
+          forkedFromId: "parent-thread",
+          timestamp: "2026-05-15T10:00:30.000Z",
+          threadSource: "SubAgent"
+        }
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-05-15T10:01:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            model: "gpt-5",
+            total_token_usage: { input_tokens: 20, cached_input_tokens: 5, output_tokens: 10 }
+          }
+        }
+      })
+    ]);
+
+    const result = await scanLocalCostSources(loadTestConfig({ CODEX_HOME: root }));
+
+    expect(result.records).toHaveLength(2);
+    expect(result.records.reduce((total, item) => total + item.input_tokens + item.output_tokens, 0)).toBe(
+      180
+    );
+    expect(result.records.some((item) => item.dedupe_key.startsWith("subagent-thread:"))).toBe(true);
+  });
+
   it("keeps the first session metadata id when a file repeats session metadata", async () => {
     const root = await makeTempRoot();
     await writeJsonl(join(root, "sessions", "2026", "05", "15", "parent.jsonl"), [
@@ -333,7 +468,7 @@ describe("local cost sources", () => {
     expect(result.warnings.find((item) => item.code === "duplicate_records_skipped")).toBeUndefined();
   });
 
-  it("subtracts inherited parent totals from forked cumulative Codex sessions", async () => {
+  it("uses legacy fork adjustment when subagent metadata lacks its own id", async () => {
     const root = await makeTempRoot();
     await writeJsonl(join(root, "sessions", "2026", "05", "15", "parent.jsonl"), [
       JSON.stringify({
@@ -360,9 +495,10 @@ describe("local cost sources", () => {
       JSON.stringify({
         type: "session_meta",
         payload: {
-          id: "child-session",
+          session_id: "child-session",
           forked_from_id: "parent-session",
-          timestamp: "2026-05-15T10:00:30.000Z"
+          timestamp: "2026-05-15T10:00:30.000Z",
+          thread_source: "subagent"
         }
       }),
       JSON.stringify({
