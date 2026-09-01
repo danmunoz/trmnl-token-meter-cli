@@ -235,6 +235,16 @@ Remove background sync:
 npx trmnl-token-meter uninstall
 ```
 
+Repair a background service after a Node.js or package-manager upgrade:
+
+```bash
+npx trmnl-token-meter service repair
+```
+
+Repair rewrites the scheduled runner with a stable Node launcher and does not
+start an immediate sync. Use `service repair --sync-now` only when you also
+want a fresh aggregate uploaded immediately.
+
 By default, `uninstall` keeps local pairing credentials. Use `uninstall --revoke` if you also want to revoke this machine from the TRMNL meter.
 
 ## Background Sync

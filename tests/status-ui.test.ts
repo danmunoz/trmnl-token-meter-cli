@@ -27,11 +27,13 @@ describe("status UI", () => {
             installed: true,
             method: "launchd",
             runner: "/tmp/runner.js",
+            launcher: "/opt/homebrew/bin/node",
             runner_version: "0.1.1",
             current_version: "0.1.1",
             interval_minutes: 60,
             last_sync_at: null,
-            last_status: null
+            last_status: null,
+            health: "healthy"
           },
           syncState: {
             last_sync_at: "2026-05-19T09:55:00.000Z",
@@ -84,11 +86,13 @@ describe("status UI", () => {
             installed: false,
             method: null,
             runner: null,
+            launcher: null,
             runner_version: null,
             current_version: "0.1.1",
             interval_minutes: null,
             last_sync_at: null,
-            last_status: null
+            last_status: null,
+            health: "unknown"
           },
           syncState: {
             last_sync_at: null,
@@ -119,11 +123,13 @@ describe("status UI", () => {
             installed: true,
             method: "launchd",
             runner: "/tmp/runner.js",
+            launcher: "/opt/homebrew/bin/node",
             runner_version: "0.1.0",
             current_version: "0.1.1",
             interval_minutes: 60,
             last_sync_at: null,
-            last_status: null
+            last_status: null,
+            health: "healthy"
           },
           syncState: {
             last_sync_at: "2026-05-19T09:55:00.000Z",
@@ -133,5 +139,35 @@ describe("status UI", () => {
         formatDate
       )
     ).toContain("Action: run the newer CLI once to refresh the installed background runner");
+  });
+
+  it("renders repair guidance when a registered scheduler is crash-looping", () => {
+    expect(
+      renderStatusSummary(
+        {
+          credential: null,
+          remoteStatus: null,
+          remoteError: null,
+          revoked: false,
+          localService: {
+            installed: true,
+            method: "launchd",
+            runner: "/tmp/runner.js",
+            launcher: "/opt/homebrew/bin/node",
+            runner_version: "0.1.1",
+            current_version: "0.1.1",
+            interval_minutes: 60,
+            last_sync_at: "2026-05-19T09:55:00.000Z",
+            last_status: "success",
+            health: "crash_loop"
+          },
+          syncState: {
+            last_sync_at: "2026-05-19T09:55:00.000Z",
+            last_status: "success"
+          }
+        },
+        formatDate
+      )
+    ).toContain("Action: run `trmnl-token-meter service repair` to rebuild background sync");
   });
 });

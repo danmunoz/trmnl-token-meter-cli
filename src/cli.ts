@@ -123,6 +123,7 @@ Usage:
   trmnl-token-meter add             Add or replace the paired meter
   trmnl-token-meter revoke          Revoke this machine and stop background sync
   trmnl-token-meter uninstall       Remove background sync, optionally revoke
+  trmnl-token-meter service repair  Rebuild background sync without an immediate upload
   trmnl-token-meter sync --once     Upload once for background services
 
 Existing commands:
@@ -213,7 +214,7 @@ async function applyUploadInterval(
   try {
     const localService = await serviceStatus(config);
     if (localService.installed) {
-      await installBackgroundService(config, normalized, { credential });
+      await installBackgroundService(config, normalized, { credential, runAtLoad: false });
     }
   } catch (error) {
     process.stderr.write(
@@ -393,10 +394,30 @@ async function uninstallServiceCommand(args: string[], config: CollectorConfig):
   process.stdout.write("Background sync removed\n");
 }
 
+async function repairServiceCommand(args: string[], config: CollectorConfig): Promise<void> {
+  const allowed = new Set(["--sync-now"]);
+  const invalid = args.find((arg) => !allowed.has(arg));
+  if (invalid) throw new Error(`Unknown service repair option: ${invalid}`);
+
+  const credential = await loadCredential(config.credentialPath);
+  if (!credential) throw new Error("Collector is not paired. Run setup first.");
+  const runAtLoad = hasFlag(args, "--sync-now");
+  const metadata = await installBackgroundService(config, credential.upload_interval_minutes, {
+    credential,
+    runAtLoad
+  });
+  process.stdout.write(
+    runAtLoad
+      ? `Background sync repaired with ${metadata.method}; a fresh sync may start now.\n`
+      : `Background sync repaired with ${metadata.method}; the next scheduled sync will upload usage.\n`
+  );
+}
+
 async function serviceCommand(args: string[], config: CollectorConfig): Promise<void> {
   const [subcommand = "status", ...rest] = args;
   if (subcommand === "install") return installServiceCommand(config);
   if (subcommand === "uninstall") return uninstallServiceCommand(rest, config);
+  if (subcommand === "repair") return repairServiceCommand(rest, config);
   if (subcommand === "status") return statusCommand(config);
   throw new Error(`Unknown service command: ${subcommand}`);
 }

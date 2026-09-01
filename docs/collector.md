@@ -63,6 +63,15 @@ npx trmnl-token-meter revoke
 npx trmnl-token-meter uninstall
 ```
 
+If `status` reports that background sync needs repair, run:
+
+```bash
+npx trmnl-token-meter service repair
+```
+
+This rebuilds the scheduler without an immediate upload. Add `--sync-now` to
+allow the repaired scheduler to upload a fresh aggregate immediately.
+
 `status` also reports the installed background runner version. That is the copied
 CLI runtime your scheduler actually launches, so it is the right value to check
 after an upgrade.

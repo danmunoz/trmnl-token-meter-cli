@@ -39,6 +39,18 @@ function runnerVersionLine(status: ServiceStatus): string | null {
   return `Background runner version: ${status.runner_version} (current CLI ${status.current_version})`;
 }
 
+function serviceHealthLine(status: ServiceStatus): string | null {
+  if (!status.installed || status.health === "healthy" || status.health === "unknown") return null;
+  switch (status.health) {
+    case "repair_required":
+      return "Background sync health: needs migration to a stable runtime launcher";
+    case "runtime_unavailable":
+      return "Background sync health: configured runtime is unavailable";
+    case "crash_loop":
+      return "Background sync health: scheduler is crash-looping";
+  }
+}
+
 function addSection(lines: string[], title: string, rows: string[]): void {
   if (lines.length > 0) lines.push("");
   lines.push(title);
@@ -112,6 +124,11 @@ export function renderStatusSummary(
   ];
   const runnerVersion = runnerVersionLine(data.localService);
   if (runnerVersion) syncRows.splice(1, 0, runnerVersion);
+  const health = serviceHealthLine(data.localService);
+  if (health) {
+    syncRows.push(health);
+    syncRows.push("Action: run `trmnl-token-meter service repair` to rebuild background sync");
+  }
   if (data.syncState?.last_status === "error") {
     syncRows.push(`Last sync error: ${data.syncState.last_error ?? "Unknown error"}`);
   }

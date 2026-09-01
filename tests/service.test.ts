@@ -7,6 +7,8 @@ import {
   isSyncDue,
   installStableRunner,
   envForService,
+  launchdHealthFromReport,
+  renderLaunchdPlist,
   refreshInstalledRunner,
   saveSyncState,
   serviceStatus,
@@ -278,5 +280,43 @@ describe("stableLauncherNodePath", () => {
     expect(
       stableLauncherNodePath({ execPath: cellar, candidates: [brewSymlink], realpath })
     ).toBe(cellar);
+  });
+});
+
+describe("launchdHealthFromReport", () => {
+  it("requires repair for legacy launch agents without recorded launcher metadata", () => {
+    expect(launchdHealthFromReport("state = not running", { hasLauncher: false, launcherAvailable: false })).toBe(
+      "repair_required"
+    );
+  });
+
+  it("reports a dynamic-loader crash loop even when metadata predates the launcher check", () => {
+    expect(
+      launchdHealthFromReport("successive crashes = 289\nlast exit reason = OS_REASON_DYLD", {
+        hasLauncher: false,
+        launcherAvailable: false
+      })
+    ).toBe("crash_loop");
+  });
+
+  it("reports an unavailable recorded runtime", () => {
+    expect(launchdHealthFromReport("state = not running", { hasLauncher: true, launcherAvailable: false })).toBe(
+      "runtime_unavailable"
+    );
+  });
+});
+
+describe("renderLaunchdPlist", () => {
+  it("does not launch a repaired service immediately unless explicitly requested", () => {
+    const config = loadConfig({
+      TRMNL_TOKEN_METER_CONFIG_DIR: "/tmp/trmnl-token-meter-config",
+      TRMNL_TOKEN_METER_CACHE_DIR: "/tmp/trmnl-token-meter-cache"
+    });
+
+    const deferred = renderLaunchdPlist(config, "/tmp/runner.js", 60, "/opt/homebrew/bin/node", false);
+    const immediate = renderLaunchdPlist(config, "/tmp/runner.js", 60, "/opt/homebrew/bin/node", true);
+
+    expect(deferred).not.toContain("<key>RunAtLoad</key>");
+    expect(immediate).toContain("<key>RunAtLoad</key>");
   });
 });

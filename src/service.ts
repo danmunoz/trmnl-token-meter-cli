@@ -20,6 +20,7 @@ export interface ServiceMetadata {
   runner: string;
   interval_minutes: number;
   runner_version?: string;
+  launcher?: string;
 }
 
 export interface SyncState {
@@ -32,11 +33,13 @@ export interface ServiceStatus {
   installed: boolean;
   method: ServiceMetadata["method"] | null;
   runner: string | null;
+  launcher: string | null;
   runner_version: string | null;
   current_version: string;
   interval_minutes: number | null;
   last_sync_at: string | null;
   last_status: SyncState["last_status"];
+  health: "healthy" | "repair_required" | "runtime_unavailable" | "crash_loop" | "unknown";
   last_error?: string;
 }
 
@@ -127,6 +130,15 @@ export function stableLauncherNodePath(
   }
 
   return execPath;
+}
+
+export function launchdHealthFromReport(
+  report: string,
+  options: { hasLauncher: boolean; launcherAvailable: boolean }
+): ServiceStatus["health"] {
+  if (/successive crashes = [1-9]\d*|last exit reason = OS_REASON_DYLD/.test(report)) return "crash_loop";
+  if (!options.hasLauncher) return "repair_required";
+  return options.launcherAvailable ? "healthy" : "runtime_unavailable";
 }
 
 const normalizeProviderListForEnv = (providers: SourceProvider[]): string =>
@@ -224,11 +236,12 @@ export async function installStableRunner(
   return runner;
 }
 
-function launchdPlist(
+export function renderLaunchdPlist(
   config: CollectorConfig,
   runner: string,
   intervalMinutes: number,
   launcher: string,
+  runAtLoad: boolean,
   credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): string {
   const env = envForService(config, credential);
@@ -255,8 +268,7 @@ function launchdPlist(
   <dict>
 ${envXml}
   </dict>
-  <key>RunAtLoad</key>
-  <true/>
+${runAtLoad ? "  <key>RunAtLoad</key>\n  <true/>\n" : ""}
   <key>StartInterval</key>
   <integer>${Math.max(60, intervalMinutes * 60)}</integer>
   <key>StandardOutPath</key>
@@ -287,12 +299,12 @@ ExecStart="${launcher}" "${runner}" sync --once
 `;
 }
 
-function systemdTimer(intervalMinutes: number): string {
+function systemdTimer(intervalMinutes: number, runAtLoad: boolean): string {
   return `[Unit]
 Description=Run TRMNL Token Meter sync
 
 [Timer]
-OnBootSec=2min
+${runAtLoad ? "OnBootSec=2min" : `OnActiveSec=${Math.max(1, intervalMinutes)}min`}
 OnUnitActiveSec=${Math.max(1, intervalMinutes)}min
 Unit=trmnl-token-meter.service
 
@@ -306,12 +318,13 @@ async function installLaunchd(
   runner: string,
   intervalMinutes: number,
   launcher: string,
+  runAtLoad: boolean,
   runCommand: CommandRunner,
   credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): Promise<void> {
   const plistPath = join(homedir(), "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`);
   await mkdir(dirname(plistPath), { recursive: true });
-  await writeFile(plistPath, launchdPlist(config, runner, intervalMinutes, launcher, credential), {
+  await writeFile(plistPath, renderLaunchdPlist(config, runner, intervalMinutes, launcher, runAtLoad, credential), {
     mode: 0o600
   });
   const target = `gui/${process.getuid?.() ?? ""}`;
@@ -324,6 +337,7 @@ async function installSystemd(
   runner: string,
   intervalMinutes: number,
   launcher: string,
+  runAtLoad: boolean,
   runCommand: CommandRunner,
   credential?: Pick<CollectorCredential, "enabled_providers"> | null
 ): Promise<void> {
@@ -334,7 +348,7 @@ async function installSystemd(
     systemdService(config, runner, launcher, credential),
     { mode: 0o600 }
   );
-  await writeFile(join(userDir, "trmnl-token-meter.timer"), systemdTimer(intervalMinutes), {
+  await writeFile(join(userDir, "trmnl-token-meter.timer"), systemdTimer(intervalMinutes, runAtLoad), {
     mode: 0o600
   });
   await runCommand("systemctl", ["--user", "daemon-reload"]);
@@ -387,18 +401,20 @@ export async function installBackgroundService(
     credential?: Pick<CollectorCredential, "enabled_providers"> | null;
     sourceDir?: string;
     runCommand?: CommandRunner;
+    runAtLoad?: boolean;
   } = {}
 ): Promise<ServiceMetadata> {
   const runCommand = options.runCommand ?? defaultCommandRunner;
   const runner = await installStableRunner(config, options.sourceDir);
   const launcher = stableLauncherNodePath();
+  const runAtLoad = options.runAtLoad ?? true;
   let method: ServiceMetadata["method"];
   if (platform() === "darwin") {
-    await installLaunchd(config, runner, intervalMinutes, launcher, runCommand, options.credential);
+    await installLaunchd(config, runner, intervalMinutes, launcher, runAtLoad, runCommand, options.credential);
     method = "launchd";
   } else if (platform() === "linux") {
     try {
-      await installSystemd(config, runner, intervalMinutes, launcher, runCommand, options.credential);
+      await installSystemd(config, runner, intervalMinutes, launcher, runAtLoad, runCommand, options.credential);
       method = "systemd";
     } catch {
       await installCron(config, runner, intervalMinutes, launcher, runCommand, options.credential);
@@ -414,7 +430,8 @@ export async function installBackgroundService(
     method,
     runner,
     interval_minutes: intervalMinutes,
-    runner_version: COLLECTOR_VERSION
+    runner_version: COLLECTOR_VERSION,
+    launcher
   };
   await writeServiceMetadata(config, metadata);
   return metadata;
@@ -546,22 +563,43 @@ export async function isSyncDue(
   return now.getTime() - lastSync.getTime() >= Math.max(1, intervalMinutes) * 60_000;
 }
 
+async function launcherHealth(
+  metadata: ServiceMetadata,
+  readCommandText: TextRunner
+): Promise<ServiceStatus["health"]> {
+  if (!metadata.launcher) return "repair_required";
+  if (!(await pathExists(metadata.launcher))) return "runtime_unavailable";
+  try {
+    await readCommandText(metadata.launcher, ["--version"]);
+    return "healthy";
+  } catch {
+    return "runtime_unavailable";
+  }
+}
+
 async function schedulerInstalled(
   config: CollectorConfig,
   metadata: ServiceMetadata,
   options: { runCommand?: CommandRunner; readCommandText?: TextRunner } = {}
-): Promise<boolean> {
+): Promise<{ installed: boolean; health: ServiceStatus["health"] }> {
   const runCommand = options.runCommand ?? defaultCommandRunner;
   const readCommandText = options.readCommandText ?? defaultTextRunner;
 
   if (metadata.method === "launchd") {
     const plistPath = join(homedir(), "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`);
-    if (!(await pathExists(plistPath))) return false;
+    if (!(await pathExists(plistPath))) return { installed: false, health: "unknown" };
     try {
-      await runCommand("launchctl", ["print", `gui/${process.getuid?.() ?? ""}/${SERVICE_LABEL}`]);
-      return true;
+      const report = await readCommandText("launchctl", ["print", `gui/${process.getuid?.() ?? ""}/${SERVICE_LABEL}`]);
+      const health = await launcherHealth(metadata, readCommandText);
+      return {
+        installed: true,
+        health: launchdHealthFromReport(report, {
+          hasLauncher: Boolean(metadata.launcher),
+          launcherAvailable: health === "healthy"
+        })
+      };
     } catch {
-      return false;
+      return { installed: false, health: "unknown" };
     }
   }
 
@@ -571,39 +609,43 @@ async function schedulerInstalled(
       !(await pathExists(join(userDir, "trmnl-token-meter.timer"))) ||
       !(await pathExists(join(userDir, "trmnl-token-meter.service")))
     ) {
-      return false;
+      return { installed: false, health: "unknown" };
     }
     try {
       await runCommand("systemctl", ["--user", "is-enabled", "trmnl-token-meter.timer"]);
-      return true;
+      return { installed: true, health: await launcherHealth(metadata, readCommandText) };
     } catch {
-      return false;
+      return { installed: false, health: "unknown" };
     }
   }
 
   try {
     const current = await readCommandText("crontab", ["-l"]);
-    return current.includes(CRON_BEGIN) && current.includes(CRON_END);
+    return {
+      installed: current.includes(CRON_BEGIN) && current.includes(CRON_END),
+      health: await launcherHealth(metadata, readCommandText)
+    };
   } catch {
-    return false;
+    return { installed: false, health: "unknown" };
   }
 }
 
 export async function serviceStatus(config: CollectorConfig): Promise<ServiceStatus> {
   const [metadata, state] = await Promise.all([readServiceMetadata(config), readSyncState(config)]);
   const runnerVersion = await readRunnerVersion(metadata);
-  const installed =
-    Boolean(metadata && (await pathExists(metadata.runner))) &&
-    Boolean(metadata && (await schedulerInstalled(config, metadata)));
+  const scheduler = metadata ? await schedulerInstalled(config, metadata) : { installed: false, health: "unknown" as const };
+  const installed = Boolean(metadata && (await pathExists(metadata.runner))) && scheduler.installed;
   return {
     installed,
     method: metadata?.method ?? null,
     runner: metadata?.runner ?? null,
+    launcher: metadata?.launcher ?? null,
     runner_version: runnerVersion,
     current_version: COLLECTOR_VERSION,
     interval_minutes: metadata?.interval_minutes ?? null,
     last_sync_at: state?.last_sync_at ?? null,
     last_status: state?.last_status ?? null,
+    health: metadata ? scheduler.health : "unknown",
     ...(state?.last_error ? { last_error: state.last_error } : {})
   };
 }
