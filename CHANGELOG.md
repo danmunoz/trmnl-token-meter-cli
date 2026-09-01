@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.4](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.3...trmnl-token-meter-0.4.4) (2026-09-01)
+
+
+### Bug Fixes
+
+* count token usage ([6c50edf](https://github.com/danmunoz/trmnl-token-meter-cli/commit/6c50edf2e796cd16ed9aad9a59a7c5f8eaf0df59))
+* count token usage ([24852c3](https://github.com/danmunoz/trmnl-token-meter-cli/commit/24852c352263d79215384393da3d24ff97939a06))
+
 ## [0.4.3](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.2...trmnl-token-meter-0.4.3) (2026-09-01)
 
 
