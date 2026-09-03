@@ -304,6 +304,22 @@ trmnl-token-meter status
 
 This is useful for local development and manual testing. The public setup flow still uses `npx trmnl-token-meter`.
 
+### Pricing Catalog Drift
+
+The bundled pricing catalog in `src/pricing/models.ts` is a hand-maintained port of
+[CodexBar](https://github.com/steipete/CodexBar)'s rate card, so it drifts whenever a
+provider ships a model or changes a price. If you have the CodexBar CLI installed, this
+check compares the catalog against it:
+
+```bash
+pnpm test:oracle
+```
+
+It fails when CodexBar prices a model the catalog does not, and when the two disagree on
+the price of the same tokens. It is opt-in and excluded from `pnpm test` because it reads
+whatever usage history the machine happens to have; it skips itself when CodexBar is not
+installed. Nothing it reads leaves the machine.
+
 ## Inspect Before Uploading
 
 Use `collect` to print the exact sanitized payload locally without uploading:
