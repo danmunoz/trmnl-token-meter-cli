@@ -3,13 +3,31 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json") as { version?: unknown };
 
-export const AGGREGATE_SCHEMA_VERSION = "2026-05-28.v4-14day-window";
+export const AGGREGATE_SCHEMA_VERSION = "2026-09-03.v5-cost-provenance";
 export const COLLECTOR_VERSION =
   typeof packageJson.version === "string" ? packageJson.version : "0.0.0-development";
 export const COST_ENGINE_VERSION = "2026-09-01.codexbar-counter-parity";
 export const DEFAULT_UPLOAD_INTERVAL_MINUTES = 60;
 
 export type CostStatus = "known" | "partial" | "unknown" | "disabled";
+
+/**
+ * Where the dollars in a row actually came from.
+ *
+ * `cost_status` says how complete a cost figure is; this says who priced it, which
+ * is a different question once more than one pricing engine can contribute. A row
+ * priced by a locally installed CodexBar is not the bundled catalog's work, and the
+ * backend cannot tell the two apart from the numbers alone.
+ */
+export type CostProvenance =
+  | "local_catalog"
+  | "codexbar_cli"
+  | "provider_reported"
+  | "mixed"
+  | "none";
+
+/** The pricing engine that produced a record's `observed_cost_usd`. */
+export type RecordCostSource = "codexbar_cli" | "provider_reported";
 export type WarningSeverity = "info" | "warning" | "error";
 export type SourceProvider = "codex" | "opencode" | "claude";
 export type WarningCode =
@@ -27,6 +45,9 @@ export type WarningCode =
   | "pi_sessions_disabled"
   | "pi_sessions_missing"
   | "pi_sessions_malformed"
+  | "codexbar_unavailable"
+  | "codexbar_failed"
+  | "codexbar_pricing_incomplete"
   | "duplicate_records_skipped"
   | "stale_upload"
   | "upload_rejected";
@@ -64,6 +85,14 @@ export interface UsagePeriod {
   total_tokens: number;
   estimated_cost_usd: number | null;
   cost_status: CostStatus;
+  cost_provenance: CostProvenance;
+  /**
+   * Identifiers for the pricing engines that produced `estimated_cost_usd`, such as
+   * `2026-07-12.codexbar-parity` or `codexbar-cli-0.56.3`. Empty when there is no
+   * cost. `pricing_catalog_version` keeps its existing meaning — the bundled
+   * catalog this collector shipped with — whether or not it priced this row.
+   */
+  cost_catalog_versions: string[];
   pricing_catalog_version: string;
   warning_codes: WarningCode[];
 }
@@ -79,6 +108,8 @@ export interface ModelUsage {
   total_tokens: number;
   estimated_cost_usd: number | null;
   cost_status: CostStatus;
+  cost_provenance: CostProvenance;
+  cost_catalog_versions: string[];
   pricing_catalog_version: string;
   warning_codes: WarningCode[];
 }
@@ -89,7 +120,8 @@ export type LocalUsageSourceKind =
   | "codex_priority_sqlite"
   | "opencode_sqlite"
   | "claude_projects"
-  | "pi_sessions";
+  | "pi_sessions"
+  | "codexbar_cost";
 
 export type LocalUsageSourceStatusValue =
   | "read"
@@ -130,6 +162,8 @@ export interface SessionUsageRecord extends TokenUsage {
   model_alias?: string;
   turn_id?: string;
   observed_cost_usd?: number;
+  cost_source?: RecordCostSource;
+  cost_catalog_version?: string;
   long_context: boolean | "unknown";
   priority_tier: "base" | "priority" | "unknown";
   pricing_known: boolean;
@@ -146,6 +180,7 @@ export interface CostAggregationResult {
   sources: LocalUsageSourceStatus[];
   providerStatuses: ProviderStatus[];
   warnings: CollectorWarning[];
+  codexBar: CodexBarCollectorInfo;
 }
 
 export interface AggregateSnapshot {
@@ -169,10 +204,18 @@ export interface AggregateSnapshot {
     cost_engine_version: string;
     supported_providers: SourceProvider[];
     enabled_providers: SourceProvider[];
+    codexbar: CodexBarCollectorInfo;
     sources: LocalUsageSourceStatus[];
     provider_statuses: ProviderStatus[];
     warnings: CollectorWarning[];
   };
+}
+
+/** Whether a local CodexBar install priced any of this snapshot, and which one. */
+export interface CodexBarCollectorInfo {
+  available: boolean;
+  version: string | null;
+  providers: SourceProvider[];
 }
 
 export interface SourceSummary {

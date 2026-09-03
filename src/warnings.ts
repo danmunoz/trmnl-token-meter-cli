@@ -15,6 +15,9 @@ const severityByCode: Record<WarningCode, WarningSeverity> = {
   pi_sessions_disabled: "info",
   pi_sessions_missing: "info",
   pi_sessions_malformed: "warning",
+  codexbar_unavailable: "info",
+  codexbar_failed: "warning",
+  codexbar_pricing_incomplete: "info",
   duplicate_records_skipped: "warning",
   stale_upload: "warning",
   upload_rejected: "error"

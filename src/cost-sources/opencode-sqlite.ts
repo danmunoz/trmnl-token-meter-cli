@@ -119,7 +119,13 @@ function recordFromMessage(row: OpenCodeMessageRow): SessionUsageRecord | null {
     local_date: localDateKey(occurredAt),
     model,
     model_alias: model,
-    ...(observedCost !== null ? { observed_cost_usd: observedCost } : {}),
+    ...(observedCost !== null
+      ? {
+          observed_cost_usd: observedCost,
+          cost_source: "provider_reported" as const,
+          cost_catalog_version: "opencode-db"
+        }
+      : {}),
     input_tokens: input,
     cached_input_tokens: cacheRead,
     output_tokens: output + reasoning,

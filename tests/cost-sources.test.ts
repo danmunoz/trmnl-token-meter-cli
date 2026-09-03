@@ -24,6 +24,9 @@ const loadTestConfig = (env: NodeJS.ProcessEnv) =>
   loadConfig({
     TRMNL_TOKEN_METER_OPENCODE_DB: join(String(env.CODEX_HOME ?? tmpdir()), "missing-opencode.db"),
     TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: join(String(env.CODEX_HOME ?? tmpdir()), "missing-claude"),
+    // These suites assert on fixture records, so a real CodexBar install on the
+    // machine running them must not replace the local scan.
+    TRMNL_TOKEN_METER_CODEXBAR: "off",
     ...env
   });
 

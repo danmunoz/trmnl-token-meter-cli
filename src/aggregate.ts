@@ -11,7 +11,9 @@ import {
   COLLECTOR_VERSION,
   COST_ENGINE_VERSION,
   type AggregateSnapshot,
+  type CodexBarCollectorInfo,
   type CollectorWarning,
+  type CostProvenance,
   type CostStatus,
   type DailyUsage,
   type LocalUsageSourceStatus,
@@ -38,7 +40,10 @@ export interface AggregateOptions {
   supportedProviders?: SourceProvider[];
   enabledProviders?: SourceProvider[];
   providerStatuses?: ProviderStatus[];
+  codexBar?: CodexBarCollectorInfo;
 }
+
+const noCodexBar: CodexBarCollectorInfo = { available: false, version: null, providers: [] };
 
 const addDays = (date: string, days: number): string => nextLocalDate(date, days);
 
@@ -64,6 +69,8 @@ const emptyPeriod = (start: string, end: string, costStatus: CostStatus): UsageP
   total_tokens: 0,
   estimated_cost_usd: costStatus === "known" ? 0 : null,
   cost_status: costStatus,
+  cost_provenance: "none",
+  cost_catalog_versions: [],
   pricing_catalog_version: pricingCatalogVersion,
   warning_codes: []
 });
@@ -110,32 +117,77 @@ const recordWarningCodes = (records: readonly SessionUsageRecord[]): WarningCode
   ) {
     codes.add("unknown_pricing");
   }
-  if (records.some((record) => record.long_context === "unknown")) {
+  // All three codes describe uncertainty in this collector's own pricing. A record
+  // whose cost was reported by CodexBar or by the provider is already priced, and
+  // the long-context and priority-tier questions no longer affect its dollars.
+  const catalogPriced = records.filter((record) => record.observed_cost_usd === undefined);
+  if (catalogPriced.some((record) => record.long_context === "unknown")) {
     codes.add("long_context_pricing_unknown");
   }
-  if (records.some((record) => record.priority_tier === "unknown")) {
+  if (catalogPriced.some((record) => record.priority_tier === "unknown")) {
     codes.add("priority_evidence_missing");
   }
   return [...codes].sort();
 };
 
+type CostAttribution = Pick<
+  UsagePeriod,
+  "estimated_cost_usd" | "cost_status" | "cost_provenance" | "cost_catalog_versions" | "pricing_catalog_version"
+>;
+
+/** Collects which pricing engines produced dollars, and under which version. */
+class CostSources {
+  private readonly versions = new Map<CostProvenance, Set<string>>();
+
+  add(provenance: CostProvenance, version: string): void {
+    const seen = this.versions.get(provenance) ?? new Set<string>();
+    seen.add(version);
+    this.versions.set(provenance, seen);
+  }
+
+  addObserved(records: readonly SessionUsageRecord[]): void {
+    for (const record of records) {
+      if (record.observed_cost_usd === undefined) continue;
+      const provenance: CostProvenance = record.cost_source ?? "provider_reported";
+      this.add(provenance, record.cost_catalog_version ?? provenance);
+    }
+  }
+
+  get provenance(): CostProvenance {
+    const engines = [...this.versions.keys()];
+    if (engines.length === 0) return "none";
+    if (engines.length === 1) return engines[0] ?? "none";
+    return "mixed";
+  }
+
+  get catalogVersions(): string[] {
+    return [...new Set([...this.versions.values()].flatMap((set) => [...set]))].sort();
+  }
+}
+
+const roundCost = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
+
 const estimateRecords = (
   records: readonly SessionUsageRecord[],
   showCost: boolean
-): Pick<UsagePeriod, "estimated_cost_usd" | "cost_status" | "pricing_catalog_version"> => {
+): CostAttribution => {
   if (!showCost) {
     return {
       estimated_cost_usd: null,
       cost_status: "disabled",
+      cost_provenance: "none",
+      cost_catalog_versions: [],
       pricing_catalog_version: pricingCatalogVersion
     };
   }
 
+  const sources = new CostSources();
   const observedCost = records.reduce(
     (total, record) => total + (record.observed_cost_usd ?? 0),
     0
   );
   const observedCostCount = records.filter((record) => record.observed_cost_usd !== undefined).length;
+  sources.addObserved(records);
   const recordsWithoutObservedCost = records.filter((record) => record.observed_cost_usd === undefined);
   const unpricedOpenCodeRecords = recordsWithoutObservedCost.filter(
     (record) => record.source_provider === "opencode"
@@ -147,10 +199,10 @@ const estimateRecords = (
     const hasUnpricedOpenCode = unpricedOpenCodeRecords.length > 0;
     return {
       estimated_cost_usd:
-        hasUnpricedOpenCode && observedCostCount === 0
-          ? null
-          : Math.round(observedCost * 1_000_000) / 1_000_000,
+        hasUnpricedOpenCode && observedCostCount === 0 ? null : roundCost(observedCost),
       cost_status: hasUnpricedOpenCode ? (observedCostCount > 0 ? "partial" : "unknown") : "known",
+      cost_provenance: sources.provenance,
+      cost_catalog_versions: sources.catalogVersions,
       pricing_catalog_version: pricingCatalogVersion
     };
   }
@@ -173,14 +225,18 @@ const estimateRecords = (
     { showCost: true }
   );
 
+  if (estimate.estimated_cost_usd !== null) {
+    sources.add("local_catalog", estimate.pricing_catalog_version);
+  }
+
   const hasObservedCost = observedCostCount > 0;
   const hasUnpricedOpenCode = unpricedOpenCodeRecords.length > 0;
   const estimatedCost =
     estimate.estimated_cost_usd === null
       ? hasObservedCost
-        ? Math.round(observedCost * 1_000_000) / 1_000_000
+        ? roundCost(observedCost)
         : null
-      : Math.round((observedCost + estimate.estimated_cost_usd) * 1_000_000) / 1_000_000;
+      : roundCost(observedCost + estimate.estimated_cost_usd);
 
   return {
     estimated_cost_usd: estimatedCost,
@@ -188,7 +244,9 @@ const estimateRecords = (
       hasUnpricedOpenCode || (hasObservedCost && estimate.cost_status === "unknown")
         ? "partial"
         : estimate.cost_status,
-    pricing_catalog_version: estimate.pricing_catalog_version
+    cost_provenance: sources.provenance,
+    cost_catalog_versions: sources.catalogVersions,
+    pricing_catalog_version: pricingCatalogVersion
   };
 };
 
@@ -387,6 +445,7 @@ export function buildAggregate(
       supported_providers: options.supportedProviders ?? SUPPORTED_PROVIDERS,
       enabled_providers: options.enabledProviders ?? ["codex"],
       provider_statuses: options.providerStatuses ?? [],
+      codexbar: options.codexBar ?? noCodexBar,
       sources: options.sources ?? [],
       warnings
     }

@@ -95,7 +95,8 @@ describe("privacy canaries", () => {
       CODEX_HOME: fixtureRoot,
       TRMNL_TOKEN_METER_OPENCODE_DB: opencodeDb,
       TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: claudeRoot,
-      TRMNL_TOKEN_METER_ENABLED_PROVIDERS: "codex,opencode"
+      TRMNL_TOKEN_METER_ENABLED_PROVIDERS: "codex,opencode",
+      TRMNL_TOKEN_METER_CODEXBAR: "off"
     });
     const result = await scanLocalCostSources(config);
     const snapshot = buildAggregate(result.records, {

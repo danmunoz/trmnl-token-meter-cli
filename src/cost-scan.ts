@@ -14,6 +14,7 @@ import { readClaudeProjectSource } from "./cost-sources/claude-projects.js";
 import { readOpenCodeSqliteSource } from "./cost-sources/opencode-sqlite.js";
 import { readPiSessionSource } from "./cost-sources/pi-sessions.js";
 import { readPriorityEvidence } from "./cost-sources/priority-sqlite.js";
+import { readCodexBarCostSource } from "./cost-sources/codexbar-cli.js";
 
 interface ScanOptions {
   enabledProviders?: SourceProvider[];
@@ -59,7 +60,11 @@ export async function scanLocalCostSources(
 
   const providerStatuses = await probeProviderStatuses(config);
 
-  const [piResult, codexTask, opencodeTask, claudeTask] = await Promise.all([
+  // The CodexBar scan runs alongside the local scanners rather than gating them:
+  // its result is only known at the end, and a failed or absent CodexBar has to
+  // leave a complete local scan behind it.
+  const [codexBar, piResult, codexTask, opencodeTask, claudeTask] = await Promise.all([
+    readCodexBarCostSource(config, enabledProviders),
     readPiSessionSource(config),
     shouldRead("codex")
       ? Promise.all([readCodexSessionSource(config), readCodexArchiveSource(config), readPriorityEvidence(config)])
@@ -80,12 +85,18 @@ export async function scanLocalCostSources(
   addSourceStatus(opencodeTask);
   addSourceStatus(claudeTask);
 
-  const sources = [...sourceStatuses.values(), piResult.status];
+  const sources = [...sourceStatuses.values(), piResult.status, codexBar.status];
 
-  const records = applyPriorityEvidence(
+  // Where CodexBar priced a provider, its rows replace the local scan for that
+  // provider so the two never double count. The local scan still ran, and its
+  // source statuses still report what a fallback would have found.
+  const pricedByCodexBar = new Set(codexBar.providers);
+  const localRecords = applyPriorityEvidence(
     [...(sessionRead?.records ?? []), ...(archiveRead?.records ?? []), ...(opencodeTask?.records ?? []), ...(claudeTask?.records ?? []), ...piResult.records],
     priorityRead?.evidence ?? []
-  );
+  ).filter((record) => !pricedByCodexBar.has(record.source_provider));
+
+  const records = [...localRecords, ...codexBar.records];
 
   const warnings = mergeWarnings(
     [
@@ -94,9 +105,20 @@ export async function scanLocalCostSources(
       ...(archiveRead?.warnings ?? []),
       ...(priorityRead?.warnings ?? []),
       ...(opencodeTask?.warnings ?? []),
-      ...(claudeTask?.warnings ?? [])
+      ...(claudeTask?.warnings ?? []),
+      ...codexBar.warnings
     ]
   );
 
-  return { records, sources, warnings, providerStatuses };
+  return {
+    records,
+    sources,
+    warnings,
+    providerStatuses,
+    codexBar: {
+      available: codexBar.available,
+      version: codexBar.version,
+      providers: codexBar.providers
+    }
+  };
 }

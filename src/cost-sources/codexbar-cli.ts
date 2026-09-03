@@ -3,7 +3,13 @@ import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
-import type { SourceProvider } from "../types.js";
+import type { CollectorConfig } from "../config.js";
+import type {
+  CollectorWarning,
+  LocalUsageSourceStatus,
+  SessionUsageRecord,
+  SourceProvider
+} from "../types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -330,4 +336,214 @@ export async function runCodexBarCost(
   });
 
   return parseCodexBarCostPayload(JSON.parse(stdout) as unknown);
+}
+
+const SOURCE_KIND = "codexbar_cost" as const;
+
+/** CodexBar provider ids this collector already models, keyed to its own providers. */
+const providerFromCodexBarId = (id: string): SourceProvider | null => {
+  const match = CODEXBAR_COST_PROVIDERS.find((provider) => provider === id);
+  return match ?? null;
+};
+
+export const codexBarCatalogVersion = (version: string | null): string =>
+  version ? `codexbar-cli-${version}` : "codexbar-cli";
+
+/**
+ * Splits a day's reconciled lanes across the models that ran that day.
+ *
+ * CodexBar reports token lanes per day but tokens and cost per model, so the lane
+ * split for a multi-model day is not recoverable. Each model's own `totalTokens`
+ * and `cost` are preserved exactly; only the split between lanes is apportioned,
+ * and the input lane absorbs the rounding remainder so the lanes still sum to the
+ * model's reported total. Nothing downstream prices these records from their
+ * lanes — the cost is already CodexBar's — so the apportionment only has to keep
+ * token totals honest.
+ */
+function apportionLanes(lanes: CodexBarLanes, dayTotalTokens: number, modelTokens: number) {
+  if (dayTotalTokens <= 0 || modelTokens <= 0) {
+    return { inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, outputTokens: 0 };
+  }
+  const share = (laneTokens: number): number =>
+    Math.min(modelTokens, Math.round((laneTokens / dayTotalTokens) * modelTokens));
+  const cacheReadTokens = share(lanes.cacheReadTokens);
+  const cacheCreationTokens = share(lanes.cacheCreationTokens);
+  const outputTokens = share(lanes.outputTokens);
+  const remainder = modelTokens - cacheReadTokens - cacheCreationTokens - outputTokens;
+  return {
+    inputTokens: Math.max(0, remainder),
+    cacheReadTokens,
+    cacheCreationTokens,
+    outputTokens
+  };
+}
+
+// CodexBar dates are already local calendar days. Midday keeps the record clear of
+// the day boundary under any local offset, and only `local_date` is ever windowed on.
+const middayOf = (date: string): Date => {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year ?? 1970, (month ?? 1) - 1, day ?? 1, 12, 0, 0, 0);
+};
+
+function recordsForProvider(
+  payload: CodexBarProviderCost,
+  provider: SourceProvider,
+  catalogVersion: string
+): SessionUsageRecord[] {
+  const records: SessionUsageRecord[] = [];
+  for (const day of payload.daily) {
+    const lanes = codexBarDailyLanes(day);
+    // A day with tokens but no model breakdown still carries real usage; keeping it
+    // under an unknown model name is better than dropping the tokens entirely.
+    const breakdowns: CodexBarModelBreakdown[] =
+      day.modelBreakdowns.length > 0
+        ? day.modelBreakdowns
+        : day.totalTokens > 0
+          ? [{ modelName: "unknown", totalTokens: day.totalTokens, cost: day.totalCost }]
+          : [];
+
+    for (const breakdown of breakdowns) {
+      if (breakdown.totalTokens <= 0 && breakdown.cost === null) continue;
+      const apportioned = apportionLanes(lanes, day.totalTokens, breakdown.totalTokens);
+      const priced = breakdown.cost !== null;
+      records.push({
+        dedupe_key: `codexbar:${provider}:${day.date}:${breakdown.modelName}`,
+        source_provider: provider,
+        source_kind: SOURCE_KIND,
+        occurred_at: middayOf(day.date),
+        local_date: day.date,
+        model: breakdown.modelName,
+        model_alias: breakdown.modelName,
+        ...(priced
+          ? {
+              observed_cost_usd: breakdown.cost as number,
+              cost_source: "codexbar_cli" as const,
+              cost_catalog_version: catalogVersion
+            }
+          : {}),
+        input_tokens: apportioned.inputTokens,
+        cached_input_tokens: apportioned.cacheReadTokens,
+        output_tokens: apportioned.outputTokens,
+        cache_read_input_tokens: apportioned.cacheReadTokens,
+        cache_creation_input_tokens: apportioned.cacheCreationTokens,
+        // CodexBar prices per request and has already applied any long-context or
+        // priority rate. An unpriced row falls back to the bundled catalog, where
+        // neither is known for a day-level aggregate.
+        long_context: "unknown",
+        priority_tier: "unknown",
+        pricing_known: priced
+      });
+    }
+  }
+  return records;
+}
+
+export interface CodexBarCostSourceResult {
+  records: SessionUsageRecord[];
+  warnings: CollectorWarning[];
+  status: LocalUsageSourceStatus;
+  /** Providers CodexBar actually priced; the local scanners still own the rest. */
+  providers: SourceProvider[];
+  available: boolean;
+  version: string | null;
+}
+
+const unavailable = (
+  code: "codexbar_unavailable" | "codexbar_failed",
+  statusValue: "disabled" | "missing" | "unreadable" | "malformed",
+  enabled: boolean
+): CodexBarCostSourceResult => ({
+  records: [],
+  warnings: code === "codexbar_unavailable" && !enabled ? [] : [{ code, severity: code === "codexbar_failed" ? "warning" : "info" }],
+  status: {
+    kind: SOURCE_KIND,
+    enabled,
+    status: statusValue,
+    ...(enabled ? { warning_code: code } : {})
+  },
+  providers: [],
+  available: false,
+  version: null
+});
+
+/**
+ * Prices Codex and Claude usage with a locally installed CodexBar when there is one.
+ *
+ * This is the path that makes a model this collector has never heard of cost the
+ * right amount: CodexBar returns the dollars already computed from its own rate
+ * card, so no entry in `src/pricing/models.ts` is consulted for those rows. When
+ * CodexBar is absent, disabled, or fails, this returns nothing and the local
+ * scanners remain the only source, exactly as before.
+ *
+ * Only aggregate day, model, token, and cost figures are read. The payload's
+ * `projects[]` — workspace names and absolute repository paths — is never parsed.
+ */
+export async function readCodexBarCostSource(
+  config: CollectorConfig,
+  providers: readonly SourceProvider[],
+  env: NodeJS.ProcessEnv = process.env
+): Promise<CodexBarCostSourceResult> {
+  if (config.codexBarMode === "off") return unavailable("codexbar_unavailable", "disabled", false);
+  if (!codexBarProviderArgument(providers)) {
+    return unavailable("codexbar_unavailable", "disabled", false);
+  }
+
+  // Resolution goes through the config rather than the ambient environment, so a
+  // caller that builds a config from an explicit env map gets the binary it asked
+  // for instead of whatever happens to be installed on the machine.
+  const binary = config.codexBarBin
+    ? (await isExecutable(config.codexBarBin))
+      ? config.codexBarBin
+      : null
+    : await findCodexBarBinary({ PATH: env.PATH ?? "" });
+  if (!binary) return unavailable("codexbar_unavailable", "missing", true);
+
+  const version = await readCodexBarVersion(binary);
+  const catalogVersion = codexBarCatalogVersion(version);
+
+  let payloads: CodexBarProviderCost[];
+  try {
+    payloads = await runCodexBarCost({
+      binary,
+      providers,
+      days: config.codexBarDays,
+      timeoutMs: config.codexBarTimeoutMs
+    });
+  } catch {
+    // A failed scan must not take usable local history down with it.
+    return { ...unavailable("codexbar_failed", "unreadable", true), version };
+  }
+
+  const records: SessionUsageRecord[] = [];
+  const served: SourceProvider[] = [];
+  const warnings: CollectorWarning[] = [];
+  let incomplete = false;
+
+  for (const payload of payloads) {
+    const provider = providerFromCodexBarId(payload.provider);
+    // A provider that errored keeps its local scanner rather than reporting zero.
+    if (!provider || !providers.includes(provider) || payload.errorMessage) continue;
+    served.push(provider);
+    if ((payload.coverage?.unpriced ?? 0) > 0) incomplete = true;
+    records.push(...recordsForProvider(payload, provider, catalogVersion));
+  }
+
+  if (served.length === 0) {
+    return { ...unavailable("codexbar_failed", "malformed", true), version };
+  }
+  if (incomplete) warnings.push({ code: "codexbar_pricing_incomplete", severity: "info" });
+
+  return {
+    records,
+    warnings,
+    status: {
+      kind: SOURCE_KIND,
+      enabled: true,
+      status: "read",
+      record_count: records.length
+    },
+    providers: served,
+    available: true,
+    version
+  };
 }
