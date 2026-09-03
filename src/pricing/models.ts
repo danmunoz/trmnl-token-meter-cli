@@ -137,6 +137,9 @@ export const pricingCatalog: PricingModel[] = [
     }
   },
   {
+    // Claude long context is all-or-nothing on the whole request, and it triggers on
+    // the full prompt — input plus both cache lanes — rather than the input lane
+    // alone. `full-row` plus the estimator's prompt-size check matches CodexBar.
     id: "claude-sonnet-4-5",
     aliases: ["claude-sonnet-4-5", "claude-sonnet-4-5-20250929"],
     effectiveDate: "2026-05-15",
@@ -147,6 +150,7 @@ export const pricingCatalog: PricingModel[] = [
       cacheCreationUsdPerMillion: 3.75,
       outputUsdPerMillion: 15,
       thresholdTokens: 200_000,
+      thresholdMode: "full-row",
       inputUsdPerMillionAboveThreshold: 6,
       cachedInputUsdPerMillionAboveThreshold: 0.6,
       cacheCreationUsdPerMillionAboveThreshold: 7.5,
@@ -203,6 +207,7 @@ export const pricingCatalog: PricingModel[] = [
       cacheCreationUsdPerMillion: 3.75,
       outputUsdPerMillion: 15,
       thresholdTokens: 200_000,
+      thresholdMode: "full-row",
       inputUsdPerMillionAboveThreshold: 6,
       cachedInputUsdPerMillionAboveThreshold: 0.6,
       cacheCreationUsdPerMillionAboveThreshold: 7.5,

@@ -64,6 +64,12 @@ export interface TokenUsage {
   output_tokens: number;
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
+  /**
+   * The part of `cache_creation_input_tokens` written with a 1-hour TTL, which
+   * Anthropic bills at 2x input rather than the 5-minute rate of 1.25x. Always a
+   * subset of the cache-creation lane, never additional tokens.
+   */
+  cache_creation_1h_input_tokens?: number;
 }
 
 export interface UsageEvent extends TokenUsage {

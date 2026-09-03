@@ -37,8 +37,12 @@ describe("Claude pricing parity", () => {
       }
     ]);
 
+    // The 1.15M-token prompt is over the 200K threshold, and Claude long context
+    // reprices the whole request rather than only the tokens past the boundary.
     expect(estimate.cost_status).toBe("known");
-    expect(estimate.estimated_cost_usd).toBe(7.1175);
+    expect(estimate.estimated_cost_usd).toBe(
+      roundUsd(1_000_000 * 6e-6 + 100_000 * 6e-7 + 50_000 * 7.5e-6 + 100_000 * 2.25e-5)
+    );
   });
 
   it("prices CodexBar Claude Opus 4.7 regression rows", () => {
@@ -75,7 +79,7 @@ describe("Claude pricing parity", () => {
     expect(estimate.estimated_cost_usd).toBe(0.131937);
   });
 
-  it("applies Claude tiered long-context rates at the CodexBar boundary", () => {
+  it("reprices the whole Claude request past the CodexBar long-context boundary", () => {
     const estimate = estimateUsageCost([
       {
         model: "claude-sonnet-4-5",
@@ -88,7 +92,90 @@ describe("Claude pricing parity", () => {
     ]);
 
     expect(estimate.cost_status).toBe("known");
-    expect(estimate.estimated_cost_usd).toBe(0.600155);
+    expect(estimate.estimated_cost_usd).toBe(
+      roundUsd(200_010 * 6e-6 + 5 * 6e-7 + 5 * 7.5e-6 + 5 * 2.25e-5)
+    );
+  });
+
+  it("counts both cache lanes toward the Claude long-context threshold", () => {
+    // The input lane alone is nowhere near the boundary; the prompt is over it only
+    // once cache reads are counted, which is how the provider bills it.
+    const overThreshold = estimateUsageCost([
+      {
+        model: "claude-sonnet-4-5",
+        input_tokens: 10,
+        cached_input_tokens: 199_995,
+        output_tokens: 0,
+        cache_creation_input_tokens: 10,
+        cache_read_input_tokens: 199_995
+      }
+    ]);
+
+    expect(overThreshold.estimated_cost_usd).toBe(
+      roundUsd(10 * 6e-6 + 199_995 * 6e-7 + 10 * 7.5e-6)
+    );
+  });
+
+  it("bills Claude one-hour cache writes at twice the input rate", () => {
+    const fiveMinute = estimateUsageCost([
+      {
+        model: "claude-opus-5",
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 1_000_000,
+        cache_read_input_tokens: 0
+      }
+    ]);
+    const oneHour = estimateUsageCost([
+      {
+        model: "claude-opus-5",
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 1_000_000,
+        cache_creation_1h_input_tokens: 1_000_000,
+        cache_read_input_tokens: 0
+      }
+    ]);
+
+    // Opus 5 input is $5/M, so 5-minute writes bill at 1.25x and 1-hour at 2x.
+    expect(fiveMinute.estimated_cost_usd).toBe(6.25);
+    expect(oneHour.estimated_cost_usd).toBe(10);
+  });
+
+  it("splits a mixed cache-creation lane by TTL", () => {
+    const estimate = estimateUsageCost([
+      {
+        model: "claude-opus-5",
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 1_000_000,
+        cache_creation_1h_input_tokens: 600_000,
+        cache_read_input_tokens: 0
+      }
+    ]);
+
+    expect(estimate.estimated_cost_usd).toBe(roundUsd(600_000 * 1e-5 + 400_000 * 6.25e-6));
+  });
+
+  it("never bills more one-hour cache than the lane reported", () => {
+    // The 1-hour count is a subset of cache creation, so a larger value is clamped
+    // rather than inventing tokens.
+    const estimate = estimateUsageCost([
+      {
+        model: "claude-opus-5",
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 1_000,
+        cache_creation_1h_input_tokens: 9_999,
+        cache_read_input_tokens: 0
+      }
+    ]);
+
+    expect(estimate.estimated_cost_usd).toBe(roundUsd(1_000 * 1e-5));
   });
 
   it("preserves Claude threshold pricing per request instead of aggregating first", () => {
@@ -115,8 +202,11 @@ describe("Claude pricing parity", () => {
       }
     ]);
 
+    // Two requests under the threshold stay at base rates; one request of the same
+    // total size crosses it and reprices entirely, so the order of operations shows
+    // up as a 2x difference rather than a rounding one.
     expect(estimate.estimated_cost_usd).toBe(0.9);
-    expect(aggregateFirst.estimated_cost_usd).toBe(1.2);
+    expect(aggregateFirst.estimated_cost_usd).toBe(1.8);
   });
 
   it("prices claude-sonnet-4-6 as flat after the CodexBar long-context reprice", () => {

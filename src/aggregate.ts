@@ -219,6 +219,9 @@ const estimateRecords = (
       ...(record.cache_creation_input_tokens !== undefined
         ? { cache_creation_input_tokens: record.cache_creation_input_tokens }
         : {}),
+      ...(record.cache_creation_1h_input_tokens !== undefined
+        ? { cache_creation_1h_input_tokens: record.cache_creation_1h_input_tokens }
+        : {}),
       long_context: record.long_context,
       priority_tier: record.priority_tier
     })),

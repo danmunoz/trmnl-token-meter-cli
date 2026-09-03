@@ -8,6 +8,8 @@ import {
   type CodexBarProviderCost
 } from "../../src/cost-sources/codexbar-cli.js";
 import { estimateUsageCost, findPricingModel } from "../../src/pricing/index.js";
+import { readClaudeProjectSource } from "../../src/cost-sources/claude-projects.js";
+import { loadConfig } from "../../src/config.js";
 
 /**
  * Differential check of this collector's ported pricing catalog against the
@@ -31,36 +33,49 @@ const ORACLE_DAYS = 30;
 const ORACLE_TIMEOUT_MS = 240_000;
 
 // CodexBar sums unrounded line items and this collector rounds to six decimals,
-// so exact equality is the wrong assertion. These bounds are far tighter than any
-// real catalog drift (the rate changes this check is built to find run 20%+) and
-// far looser than float noise or the scaling below.
-const ABSOLUTE_TOLERANCE_USD = 0.01;
+// so exact equality is the wrong assertion. Scaling is linear, so the ratio it is
+// applied to is scale-invariant and a purely relative bound stays meaningful at any
+// scale — far tighter than real catalog drift (the rate changes this check is built
+// to find run 20%+) and far looser than rounding.
 const RELATIVE_TOLERANCE = 0.005;
 
-// Every full-row long-context threshold in the catalog is at or above 200K input
-// tokens. Comparisons are scaled under that bound; see `scaleToBaseRates`.
-const BASE_RATE_INPUT_CEILING = 100_000;
+// Days too cheap to judge: at these sizes six-decimal rounding and the scaling
+// below are a large enough share of the figure to produce noise either way.
+const MIN_COMPARABLE_USD = 0.25;
+
+// Every long-context threshold in the catalog is at or above 200K prompt tokens.
+// Comparisons are scaled under that bound; see `scaleToBaseRates`.
+const BASE_RATE_PROMPT_CEILING = 150_000;
 
 /**
  * How far below CodexBar a base-rate day may fall before it stops looking like a
  * per-request surcharge and starts looking like a stale rate.
  *
- * Observed Claude days sit at 0.72x-0.95x, and that shortfall has a known cause:
- * the catalog prices Claude cache creation at Anthropic's 5-minute rate (1.25x
- * input) while Claude Code writes 1-hour cache entries (2x input). Repricing the
- * cache-creation lane at 2x reproduces CodexBar's figure exactly on six of seven
- * single-model claude-opus-5 days and within 1.4% on the seventh. Fixing that
- * means either pricing Claude cache writes at the 1-hour rate or reading the
- * ephemeral_5m/ephemeral_1h split out of Claude transcripts; until then this floor
- * sits just under the observed band so the check still catches a genuinely stale
- * rate without failing on this one known gap.
+ * With the cache TTL split supplied, every comparable day on the machine this was
+ * developed against lands between 0.9986x and 1.0001x, so the remaining headroom is
+ * for days that genuinely contain long-context requests — which a day aggregate
+ * cannot represent and which only ever make CodexBar's figure larger.
  */
-const UNDERPRICING_FLOOR = 0.7;
+const UNDERPRICING_FLOOR = 0.95;
 
 let binary: string | null = null;
 let version: string | null = null;
 let payloads: CodexBarProviderCost[] = [];
 let scanError: Error | null = null;
+
+/**
+ * Share of each Claude day's cache-creation lane written with a 1-hour TTL.
+ *
+ * CodexBar's cost JSON reports a day's cache creation as one number, so the oracle
+ * cannot see the TTL split that both engines actually price on — and Claude days
+ * would sit ~5-28% under CodexBar for that reason alone, deep enough to hide real
+ * drift on the models that dominate spend. The split is read back from the same
+ * transcripts CodexBar scanned. A share is used rather than absolute tokens so a
+ * small difference in what each scanner deduplicated cannot skew it.
+ */
+const oneHourCacheShare = new Map<string, number>();
+
+const shareKey = (date: string, model: string): string => `${date}:${model}`;
 
 const oracleRequested = (): boolean => process.env.CODEXBAR_ORACLE === "on";
 
@@ -79,6 +94,20 @@ beforeAll(async () => {
     });
   } catch (error) {
     scanError = error instanceof Error ? error : new Error(String(error));
+  }
+
+  const totals = new Map<string, { oneHour: number; total: number }>();
+  for (const record of (await readClaudeProjectSource(loadConfig())).records) {
+    const total = record.cache_creation_input_tokens ?? 0;
+    if (total === 0) continue;
+    const key = shareKey(record.local_date, record.model);
+    const entry = totals.get(key) ?? { oneHour: 0, total: 0 };
+    entry.oneHour += record.cache_creation_1h_input_tokens ?? 0;
+    entry.total += total;
+    totals.set(key, entry);
+  }
+  for (const [key, { oneHour, total }] of totals) {
+    oneHourCacheShare.set(key, oneHour / total);
   }
 }, ORACLE_TIMEOUT_MS + 30_000);
 
@@ -103,15 +132,19 @@ const requireOracle = (skip: (note?: string) => void): boolean => {
 /**
  * Scales a day's lanes below the catalog's long-context thresholds.
  *
- * A day is an aggregate of many requests, but this collector's estimator applies
- * full-row long-context repricing whenever a single row's input lane crosses the
- * threshold. Feeding a whole day in as one row would therefore reprice usage that
- * CodexBar priced per request at base rates, and report the artifact as drift.
- * Base-rate pricing is linear, so scaling both sides by the same factor compares
- * the rate cards without tripping the threshold.
+ * A day is an aggregate of many requests, but the estimator applies full-row
+ * long-context repricing whenever a single row's prompt crosses the threshold.
+ * Feeding a whole day in as one row would therefore reprice usage that CodexBar
+ * priced per request at base rates, and report the artifact as drift. Base-rate
+ * pricing is linear, so scaling both sides by the same factor compares the rate
+ * cards without tripping the threshold.
+ *
+ * The whole prompt is scaled, not just the input lane: a long-context threshold
+ * counts cache reads and cache writes too, and a cache-heavy day clears it on
+ * those lanes alone.
  */
-const scaleToBaseRates = (inputTokens: number): number =>
-  inputTokens > BASE_RATE_INPUT_CEILING ? BASE_RATE_INPUT_CEILING / inputTokens : 1;
+const scaleToBaseRates = (promptTokens: number): number =>
+  promptTokens > BASE_RATE_PROMPT_CEILING ? BASE_RATE_PROMPT_CEILING / promptTokens : 1;
 
 interface ComparedDay {
   provider: string;
@@ -140,9 +173,14 @@ const comparableDays = (): ComparedDay[] =>
       if (!findPricingModel(breakdown.modelName)) return [];
       const lanes = codexBarDailyLanes(day);
       if (!lanes.reconciled || lanes.inputTokens === 0) return [];
+      if (day.totalCost < MIN_COMPARABLE_USD) return [];
 
-      const scale = scaleToBaseRates(lanes.inputTokens);
+      const promptTokens =
+        lanes.inputTokens + lanes.cacheReadTokens + lanes.cacheCreationTokens;
+      const scale = scaleToBaseRates(promptTokens);
       const scaled = (tokens: number): number => Math.round(tokens * scale);
+      const cacheCreation = scaled(lanes.cacheCreationTokens);
+      const share = oneHourCacheShare.get(shareKey(day.date, breakdown.modelName)) ?? 0;
       const estimate = estimateUsageCost([
         {
           model: breakdown.modelName,
@@ -150,7 +188,8 @@ const comparableDays = (): ComparedDay[] =>
           cached_input_tokens: scaled(lanes.cacheReadTokens),
           output_tokens: scaled(lanes.outputTokens),
           cache_read_input_tokens: scaled(lanes.cacheReadTokens),
-          cache_creation_input_tokens: scaled(lanes.cacheCreationTokens),
+          cache_creation_input_tokens: cacheCreation,
+          cache_creation_1h_input_tokens: Math.round(cacheCreation * share),
           long_context: false,
           priority_tier: "base"
         }
@@ -232,8 +271,7 @@ describe("CodexBar pricing oracle", () => {
         if (ours === null) {
           return [`${provider} ${day.date} ${model}: no local price, CodexBar $${theirs}`];
         }
-        const tolerance = Math.max(ABSOLUTE_TOLERANCE_USD, theirs * RELATIVE_TOLERANCE);
-        if (ours - theirs <= tolerance) return [];
+        if (ours - theirs <= theirs * RELATIVE_TOLERANCE) return [];
         return [
           `${provider} ${day.date} ${model}: ours $${ours.toFixed(6)} exceeds CodexBar $${theirs.toFixed(6)} (${(ours / theirs).toFixed(3)}x, scaled ${scale.toFixed(4)})`
         ];
