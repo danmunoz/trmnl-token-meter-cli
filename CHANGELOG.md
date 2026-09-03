@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.4...trmnl-token-meter-0.5.0) (2026-09-03)
+
+
+### Features
+
+* price Codex and Claude usage with a local CodexBar ([18a402c](https://github.com/danmunoz/trmnl-token-meter-cli/commit/18a402cf7bba600a418541771720dbb917df8d1b))
+
+
+### Bug Fixes
+
+* correct stale model prices and add the Claude 5 tier ([81df01f](https://github.com/danmunoz/trmnl-token-meter-cli/commit/81df01fd8332feddae12fbe46fc9d8ebdeed46b5))
+* price Claude cache writes by TTL and long context by prompt size ([e9d4976](https://github.com/danmunoz/trmnl-token-meter-cli/commit/e9d49769a789a6ad10254480b63dc645de4903fb))
+
 ## [0.4.4](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.3...trmnl-token-meter-0.4.4) (2026-09-01)
 
 
