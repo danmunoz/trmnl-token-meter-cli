@@ -73,6 +73,8 @@ function sourceLabel(kind: LocalUsageSourceKind): string {
       return "OpenCode SQLite";
     case "claude_projects":
       return "Claude projects";
+    case "codexbar_cost":
+      return "CodexBar cost";
   }
 }
 

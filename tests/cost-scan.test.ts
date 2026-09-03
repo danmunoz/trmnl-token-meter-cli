@@ -347,7 +347,8 @@ describe("cost aggregation windows", () => {
       loadConfig({
         CODEX_HOME: root,
         TRMNL_TOKEN_METER_OPENCODE_DB: opencodeDb,
-        TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: claudeRoot
+        TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: claudeRoot,
+        TRMNL_TOKEN_METER_CODEXBAR: "off"
       })
     );
 
@@ -391,7 +392,8 @@ describe("cost aggregation windows", () => {
         CODEX_HOME: root,
         TRMNL_TOKEN_METER_OPENCODE_DB: opencodeDb,
         TRMNL_TOKEN_METER_ENABLED_PROVIDERS: "codex,opencode",
-        TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: join(root, "missing-claude")
+        TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: join(root, "missing-claude"),
+        TRMNL_TOKEN_METER_CODEXBAR: "off"
       })
     );
 

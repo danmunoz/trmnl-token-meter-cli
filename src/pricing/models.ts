@@ -23,9 +23,23 @@ export type PricingModel = {
   price: ModelPrice;
 };
 
-export const pricingCatalogVersion = "2026-07-12.codexbar-parity" as const;
+export const pricingCatalogVersion = "2026-09-03.codexbar-parity" as const;
 
 export const pricingCatalog: PricingModel[] = [
+  {
+    // Fable 5.1 shares Fable 5's input and output rates but reads cache far more
+    // cheaply: $0.25/M against Fable 5's $1/M.
+    id: "claude-fable-5-1",
+    aliases: ["claude-fable-5-1"],
+    effectiveDate: "2026-09-03",
+    source: "models.dev anthropic (CodexBar 0.56.3 standard pricing source)",
+    price: {
+      inputUsdPerMillion: 10,
+      cachedInputUsdPerMillion: 0.25,
+      cacheCreationUsdPerMillion: 12.5,
+      outputUsdPerMillion: 50
+    }
+  },
   {
     id: "claude-fable-5",
     aliases: ["claude-fable-5"],
@@ -36,6 +50,30 @@ export const pricingCatalog: PricingModel[] = [
       cachedInputUsdPerMillion: 1,
       cacheCreationUsdPerMillion: 12.5,
       outputUsdPerMillion: 50
+    }
+  },
+  {
+    id: "claude-opus-5",
+    aliases: ["claude-opus-5"],
+    effectiveDate: "2026-09-03",
+    source: "models.dev anthropic (CodexBar 0.56.3 standard pricing source)",
+    price: {
+      inputUsdPerMillion: 5,
+      cachedInputUsdPerMillion: 0.5,
+      cacheCreationUsdPerMillion: 6.25,
+      outputUsdPerMillion: 25
+    }
+  },
+  {
+    id: "claude-sonnet-5",
+    aliases: ["claude-sonnet-5"],
+    effectiveDate: "2026-09-03",
+    source: "models.dev anthropic (CodexBar 0.56.3 standard pricing source)",
+    price: {
+      inputUsdPerMillion: 2,
+      cachedInputUsdPerMillion: 0.2,
+      cacheCreationUsdPerMillion: 2.5,
+      outputUsdPerMillion: 10
     }
   },
   {
@@ -99,6 +137,9 @@ export const pricingCatalog: PricingModel[] = [
     }
   },
   {
+    // Claude long context is all-or-nothing on the whole request, and it triggers on
+    // the full prompt — input plus both cache lanes — rather than the input lane
+    // alone. `full-row` plus the estimator's prompt-size check matches CodexBar.
     id: "claude-sonnet-4-5",
     aliases: ["claude-sonnet-4-5", "claude-sonnet-4-5-20250929"],
     effectiveDate: "2026-05-15",
@@ -109,6 +150,7 @@ export const pricingCatalog: PricingModel[] = [
       cacheCreationUsdPerMillion: 3.75,
       outputUsdPerMillion: 15,
       thresholdTokens: 200_000,
+      thresholdMode: "full-row",
       inputUsdPerMillionAboveThreshold: 6,
       cachedInputUsdPerMillionAboveThreshold: 0.6,
       cacheCreationUsdPerMillionAboveThreshold: 7.5,
@@ -165,6 +207,7 @@ export const pricingCatalog: PricingModel[] = [
       cacheCreationUsdPerMillion: 3.75,
       outputUsdPerMillion: 15,
       thresholdTokens: 200_000,
+      thresholdMode: "full-row",
       inputUsdPerMillionAboveThreshold: 6,
       cachedInputUsdPerMillionAboveThreshold: 0.6,
       cacheCreationUsdPerMillionAboveThreshold: 7.5,
@@ -175,69 +218,77 @@ export const pricingCatalog: PricingModel[] = [
     // GPT-5.6 Sol/Terra/Luna. Full-row long-context: >272K input tokens reprices
     // the whole request. cacheCreation mirrors CodexBar's cache-write rate (1.25x
     // input); Codex rows in this collector never carry a separate cache-write lane,
-    // so it stays as documented parity data.
+    // so it stays as documented parity data. Priority is OpenAI's API Fast tier,
+    // which CodexBar prices as a flat 2x multiplier on the standard rates for all
+    // three tiers — keep the priority rates at exactly 2x their base.
+    //
+    // These rates were verified against CodexBar 0.56.3's own output on real usage:
+    // solving three single-model days recovers Sol at 4/0.4/20 and Terra at
+    // 2/0.2/12 to the cent. CodexBar resolves standard pricing from models.dev
+    // before its bundled table, so models.dev is the authority here even where
+    // CodexBar's vendored fallback still carries older numbers.
     id: "gpt-5.6-sol",
     aliases: ["gpt-5.6-sol", "gpt-5.6"],
-    effectiveDate: "2026-07-12",
+    effectiveDate: "2026-07-30",
     source: "CodexBar CostUsagePricing",
     price: {
-      inputUsdPerMillion: 5,
-      cachedInputUsdPerMillion: 0.5,
-      cacheCreationUsdPerMillion: 6.25,
-      outputUsdPerMillion: 30,
+      inputUsdPerMillion: 4,
+      cachedInputUsdPerMillion: 0.4,
+      cacheCreationUsdPerMillion: 5,
+      outputUsdPerMillion: 20,
       thresholdTokens: 272_000,
       thresholdMode: "full-row",
-      inputUsdPerMillionAboveThreshold: 10,
-      cachedInputUsdPerMillionAboveThreshold: 1,
-      cacheCreationUsdPerMillionAboveThreshold: 12.5,
-      outputUsdPerMillionAboveThreshold: 45,
-      priorityInputUsdPerMillion: 10,
-      priorityCachedInputUsdPerMillion: 1,
-      priorityOutputUsdPerMillion: 60,
+      inputUsdPerMillionAboveThreshold: 8,
+      cachedInputUsdPerMillionAboveThreshold: 0.8,
+      cacheCreationUsdPerMillionAboveThreshold: 10,
+      outputUsdPerMillionAboveThreshold: 30,
+      priorityInputUsdPerMillion: 8,
+      priorityCachedInputUsdPerMillion: 0.8,
+      priorityOutputUsdPerMillion: 40,
       priorityInputTokenLimit: 272_000
     }
   },
   {
     id: "gpt-5.6-terra",
     aliases: ["gpt-5.6-terra"],
-    effectiveDate: "2026-07-12",
+    effectiveDate: "2026-07-30",
     source: "CodexBar CostUsagePricing",
     price: {
-      inputUsdPerMillion: 2.5,
-      cachedInputUsdPerMillion: 0.25,
-      cacheCreationUsdPerMillion: 3.125,
-      outputUsdPerMillion: 15,
+      inputUsdPerMillion: 2,
+      cachedInputUsdPerMillion: 0.2,
+      cacheCreationUsdPerMillion: 2.5,
+      outputUsdPerMillion: 12,
       thresholdTokens: 272_000,
       thresholdMode: "full-row",
-      inputUsdPerMillionAboveThreshold: 5,
-      cachedInputUsdPerMillionAboveThreshold: 0.5,
-      cacheCreationUsdPerMillionAboveThreshold: 6.25,
-      outputUsdPerMillionAboveThreshold: 22.5,
-      priorityInputUsdPerMillion: 5,
-      priorityCachedInputUsdPerMillion: 0.5,
-      priorityOutputUsdPerMillion: 30,
+      inputUsdPerMillionAboveThreshold: 4,
+      cachedInputUsdPerMillionAboveThreshold: 0.4,
+      cacheCreationUsdPerMillionAboveThreshold: 5,
+      outputUsdPerMillionAboveThreshold: 18,
+      priorityInputUsdPerMillion: 4,
+      priorityCachedInputUsdPerMillion: 0.4,
+      priorityOutputUsdPerMillion: 24,
       priorityInputTokenLimit: 272_000
     }
   },
   {
     id: "gpt-5.6-luna",
     aliases: ["gpt-5.6-luna"],
-    effectiveDate: "2026-07-12",
+    effectiveDate: "2026-07-30",
     source: "CodexBar CostUsagePricing",
     price: {
-      inputUsdPerMillion: 1,
-      cachedInputUsdPerMillion: 0.1,
-      cacheCreationUsdPerMillion: 1.25,
-      outputUsdPerMillion: 6,
+      inputUsdPerMillion: 0.2,
+      cachedInputUsdPerMillion: 0.02,
+      cacheCreationUsdPerMillion: 0.25,
+      outputUsdPerMillion: 1.2,
       thresholdTokens: 272_000,
       thresholdMode: "full-row",
-      inputUsdPerMillionAboveThreshold: 2,
-      cachedInputUsdPerMillionAboveThreshold: 0.2,
-      cacheCreationUsdPerMillionAboveThreshold: 2.5,
-      outputUsdPerMillionAboveThreshold: 9,
-      priorityInputUsdPerMillion: 2,
-      priorityCachedInputUsdPerMillion: 0.2,
-      priorityOutputUsdPerMillion: 12,
+      inputUsdPerMillionAboveThreshold: 0.4,
+      cachedInputUsdPerMillionAboveThreshold: 0.04,
+      cacheCreationUsdPerMillionAboveThreshold: 0.5,
+      outputUsdPerMillionAboveThreshold: 1.8,
+      priorityInputUsdPerMillion: 0.4,
+      priorityCachedInputUsdPerMillion: 0.04,
+      priorityOutputUsdPerMillion: 2.4,
       priorityInputTokenLimit: 272_000
     }
   },

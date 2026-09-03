@@ -70,7 +70,7 @@ Compact representative example:
 
 ```json
 {
-  "schema_version": "2026-05-28.v4-14day-window",
+  "schema_version": "2026-09-03.v5-cost-provenance",
   "machine_id": "mach_abc123",
   "machine_label": "My MacBook",
   "generated_at": "2026-05-18T12:42:57.320Z",
@@ -81,7 +81,9 @@ Compact representative example:
       "total_tokens": 162000,
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_provenance": "local_catalog",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     },
     "last_7_days": {
@@ -90,7 +92,9 @@ Compact representative example:
       "total_tokens": 680000,
       "estimated_cost_usd": 5.4321,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_provenance": "local_catalog",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     },
     "last_14_days": {
@@ -99,7 +103,9 @@ Compact representative example:
       "total_tokens": 1040000,
       "estimated_cost_usd": 8.7654,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_provenance": "local_catalog",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     },
     "last_30_days": {
@@ -108,7 +114,9 @@ Compact representative example:
       "total_tokens": 2120000,
       "estimated_cost_usd": 16.789,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_provenance": "local_catalog",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     }
   },
@@ -120,7 +128,9 @@ Compact representative example:
       "total_tokens": 162000,
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_provenance": "local_catalog",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": [],
       "has_usage": true,
       "is_missing": false
@@ -132,7 +142,9 @@ Compact representative example:
       "total_tokens": 136000,
       "estimated_cost_usd": 1.01,
       "cost_status": "known",
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_provenance": "local_catalog",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     }
   ],
@@ -151,6 +163,7 @@ Compact representative example:
     "cost_engine_version": "2026-09-01.codexbar-counter-parity",
     "supported_providers": ["codex", "opencode", "claude"],
     "enabled_providers": ["codex"],
+    "codexbar": { "available": false, "version": null, "providers": [] },
     "provider_statuses": [
       { "provider": "codex", "status": "available" },
       { "provider": "opencode", "status": "available" },
@@ -168,6 +181,10 @@ Compact representative example:
   }
 }
 ```
+
+`cost_provenance` and `cost_catalog_versions` say which pricing engine produced the
+dollars in a row — see [Pricing Sources](#pricing-sources). `cost_status` still says
+how complete a figure is; provenance says who computed it.
 
 The real upload can include up to 15 daily rows, up to 25 normalized model rows,
 and optional source summaries for sources enabled in the web configuration.
@@ -191,6 +208,7 @@ The CLI does not upload:
 - Raw Claude project transcripts
 - Priority database rows
 - Pi session contents
+- CodexBar workspace names or repository paths (its `projects[]` output is never read)
 - Auth files, browser cookies, API keys, TRMNL secrets, pairing codes, or collector tokens in aggregate uploads
 
 No individual usage data is sent. No raw usage content is analyzed remotely. The private parts of your AI coding activity stay local.
@@ -304,6 +322,22 @@ trmnl-token-meter status
 
 This is useful for local development and manual testing. The public setup flow still uses `npx trmnl-token-meter`.
 
+### Pricing Catalog Drift
+
+The bundled pricing catalog in `src/pricing/models.ts` is a hand-maintained port of
+[CodexBar](https://github.com/steipete/CodexBar)'s rate card, so it drifts whenever a
+provider ships a model or changes a price. If you have the CodexBar CLI installed, this
+check compares the catalog against it:
+
+```bash
+pnpm test:oracle
+```
+
+It fails when CodexBar prices a model the catalog does not, and when the two disagree on
+the price of the same tokens. It is opt-in and excluded from `pnpm test` because it reads
+whatever usage history the machine happens to have; it skips itself when CodexBar is not
+installed. Nothing it reads leaves the machine.
+
 ## Inspect Before Uploading
 
 Use `collect` to print the exact sanitized payload locally without uploading:
@@ -326,6 +360,10 @@ The collector stores credentials, service metadata, and sync state locally on yo
 - `TRMNL_TOKEN_METER_CACHE_DIR` overrides the cache directory
 - `TRMNL_TOKEN_METER_INCLUDE_PI_SESSIONS=1` includes compatible Pi session aggregates when present
 - `PI_HOME` overrides the Pi home directory. Default: `~/.pi`
+- `TRMNL_TOKEN_METER_CODEXBAR=off` always prices with the bundled catalog instead of a local CodexBar. See [Pricing Sources](#pricing-sources)
+- `CODEXBAR_BIN` pins the CodexBar binary instead of discovering it
+- `TRMNL_TOKEN_METER_CODEXBAR_DAYS` sets the CodexBar scan window. Default: `30`
+- `TRMNL_TOKEN_METER_CODEXBAR_TIMEOUT_MS` bounds the CodexBar scan. Default: `180000`
 
 Default local paths:
 
@@ -360,6 +398,53 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contributor workflow and [
 ## License
 
 This project is released under the [MIT License](./LICENSE).
+
+## Pricing Sources
+
+Token counts always come from this machine's own usage records. Dollar figures can
+come from two different pricing engines, and every aggregate row records which one
+priced it in `cost_provenance`:
+
+| `cost_provenance` | Meaning |
+| --- | --- |
+| `local_catalog` | Priced by the catalog bundled with this CLI (`src/pricing/models.ts`). |
+| `codexbar_cli` | Priced by a [CodexBar](https://github.com/steipete/CodexBar) install on this machine. |
+| `provider_reported` | The provider recorded the cost itself, as OpenCode does. |
+| `mixed` | More than one of the above contributed to this row. |
+| `none` | No cost figure is available for this row. |
+
+`cost_catalog_versions` names the exact engines, for example
+`["codexbar-cli-0.56.3"]`.
+
+### Using a local CodexBar
+
+If the CodexBar CLI is installed, the collector uses it to price Codex and Claude
+usage instead of its own bundled catalog. This matters because the bundled catalog
+is a hand-maintained port that goes stale: a model released after this CLI shipped
+has no local price, so its usage counts tokens but reports no cost. CodexBar
+maintains its own rate card, so a model it already knows is priced correctly
+without waiting for a release here.
+
+The collector discovers the binary from `CODEXBAR_BIN`, then `PATH`, then the
+locations CodexBar's "Install CLI" step symlinks. It runs one local
+`codexbar cost --format json --refresh --days 30` scan and reads only aggregate
+day, model, token, and cost figures. Nothing leaves the machine, and CodexBar's
+`projects[]` output — workspace names and absolute repository paths — is never read.
+
+This is an enhancement, never a dependency. When CodexBar is absent, disabled, or a
+scan fails, the collector falls back to its own scanners and bundled catalog, and
+records a warning. Providers CodexBar does not price, such as OpenCode, always use
+the local scanners.
+
+To always use the bundled catalog instead:
+
+```bash
+TRMNL_TOKEN_METER_CODEXBAR=off npx trmnl-token-meter collect
+```
+
+Other settings: `CODEXBAR_BIN` pins the binary,
+`TRMNL_TOKEN_METER_CODEXBAR_DAYS` sets the scan window (default `30`), and
+`TRMNL_TOKEN_METER_CODEXBAR_TIMEOUT_MS` bounds the scan (default `180000`).
 
 ## Local Sources
 

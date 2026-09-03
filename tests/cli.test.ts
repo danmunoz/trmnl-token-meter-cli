@@ -24,7 +24,10 @@ describe("collector CLI", () => {
       TRMNL_TOKEN_METER_API_BASE_URL: "https://api.example.test",
       TRMNL_TOKEN_METER_DISABLE_UPDATE_CHECK: "1",
       TRMNL_TOKEN_METER_OPENCODE_DB: join(dir, "missing-opencode.db"),
-      TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: join(dir, "missing-claude")
+      TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: join(dir, "missing-claude"),
+      // Fixture-driven assertions must not depend on whether the machine running
+      // the suite happens to have CodexBar installed.
+      TRMNL_TOKEN_METER_CODEXBAR: "off"
     };
     stdout = "";
     stderr = "";

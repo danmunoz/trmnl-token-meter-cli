@@ -51,7 +51,8 @@
     "test:privacy": "vitest run tests/privacy-canaries.test.ts tests/redact.test.ts",
     "test:pack": "node ./scripts/smoke-pack.mjs",
     "prepack": "pnpm build",
-    "prepublishOnly": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:privacy && pnpm build && pnpm test:pack"
+    "prepublishOnly": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:privacy && pnpm build && pnpm test:pack",
+    "test:oracle": "CODEXBAR_ORACLE=on vitest run tests/pricing/codexbar-oracle.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

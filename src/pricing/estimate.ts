@@ -16,6 +16,7 @@ export type TokenUsageForEstimate = {
   output_tokens: number;
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
+  cache_creation_1h_input_tokens?: number;
   long_context?: boolean | "unknown";
   priority_tier?: PriorityTier;
 };
@@ -107,12 +108,25 @@ export const estimateUsageCost = (
       ? positiveTokens(usage.cache_read_input_tokens)
       : Math.max(0, Math.min(usage.cached_input_tokens, usage.input_tokens));
     const cacheCreationTokens = positiveTokens(usage.cache_creation_input_tokens);
+    // The 1-hour slice is part of the cache-creation lane, not extra tokens.
+    const cacheCreation1hTokens = Math.min(
+      cacheCreationTokens,
+      positiveTokens(usage.cache_creation_1h_input_tokens)
+    );
+    const cacheCreation5mTokens = cacheCreationTokens - cacheCreation1hTokens;
     const outputTokens = positiveTokens(usage.output_tokens);
     const thresholdMode = model.price.thresholdMode ?? "tiered";
+    // Long context is a property of the whole prompt, and the providers report that
+    // differently: Codex's `input_tokens` is already the full prompt with cache
+    // reads inside it, while Claude reports input net of both cache lanes. Summing
+    // the lanes only where they are broken out gives the same prompt size for both.
+    const promptTokens = hasExplicitCacheLanes
+      ? inputTokens + cachedInputTokens + cacheCreationTokens
+      : rawInputTokens;
     const useFullRowThreshold =
       thresholdMode === "full-row" &&
       model.price.thresholdTokens !== undefined &&
-      rawInputTokens > model.price.thresholdTokens;
+      promptTokens > model.price.thresholdTokens;
     const priorityLimit = model.price.priorityInputTokenLimit;
     const priorityInputRate = model.price.priorityInputUsdPerMillion;
     const priorityOutputRate = model.price.priorityOutputUsdPerMillion;
@@ -166,7 +180,7 @@ export const estimateUsageCost = (
         thresholdMode
       ) +
       priceTokens(
-        cacheCreationTokens,
+        cacheCreation5mTokens,
         cacheCreationRate,
         usePriorityRates || useFullRowThreshold || thresholdMode === "full-row"
           ? undefined
@@ -174,6 +188,10 @@ export const estimateUsageCost = (
         model.price.thresholdTokens,
         thresholdMode
       ) +
+      // A 1-hour cache write bills at twice the input rate it was written against,
+      // so it follows whichever input rate applies rather than the cache-creation
+      // rate or its own threshold tier.
+      (cacheCreation1hTokens / million) * inputRate * 2 +
       priceTokens(
         outputTokens,
         outputRate,

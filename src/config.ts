@@ -3,6 +3,10 @@ import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { CollectorCredential, SourceNoticeState } from "./types.js";
 import { parseProviders } from "./source-providers.js";
+import {
+  CODEXBAR_DEFAULT_DAYS,
+  CODEXBAR_DEFAULT_TIMEOUT_MS
+} from "./cost-sources/codexbar-cli.js";
 
 const DEFAULT_API_BASE_URL = "https://trmnl-token-meter-backend.trmnltkn.workers.dev";
 export const CONFIG_DISABLED_PROVIDERS_SENTINEL = "none";
@@ -25,7 +29,21 @@ export interface CollectorConfig {
   opencodeDbPath: string;
   claudeProjectsRoots: string[] | null;
   enabledProviders: ReturnType<typeof parseProviders>;
+  /**
+   * Whether a locally installed CodexBar may price Codex and Claude usage.
+   * `auto` uses it when it is installed; `off` always uses the bundled catalog.
+   */
+  codexBarMode: "auto" | "off";
+  /** Explicit CodexBar binary from `CODEXBAR_BIN`; null falls back to discovery. */
+  codexBarBin: string | null;
+  codexBarDays: number;
+  codexBarTimeoutMs: number;
 }
+
+const positiveIntegerSetting = (value: string | undefined, fallback: number): number => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
 
 const isLoopbackHost = (hostname: string): boolean =>
   hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -105,7 +123,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
             return path.split(/[\\/]/).at(-1) === "projects" ? path : join(path, "projects");
           })
       : null,
-    enabledProviders
+    enabledProviders,
+    codexBarMode: env.TRMNL_TOKEN_METER_CODEXBAR === "off" ? "off" : "auto",
+    codexBarBin: env.CODEXBAR_BIN?.trim() || null,
+    codexBarDays: positiveIntegerSetting(
+      env.TRMNL_TOKEN_METER_CODEXBAR_DAYS,
+      CODEXBAR_DEFAULT_DAYS
+    ),
+    codexBarTimeoutMs: positiveIntegerSetting(
+      env.TRMNL_TOKEN_METER_CODEXBAR_TIMEOUT_MS,
+      CODEXBAR_DEFAULT_TIMEOUT_MS
+    )
   };
 }
 

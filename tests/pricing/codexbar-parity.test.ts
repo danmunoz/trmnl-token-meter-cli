@@ -92,7 +92,7 @@ describe("CodexBar parity pricing", () => {
 
     expect(estimate.cost_status).toBe("known");
     expect(estimate.estimated_cost_usd).toBe(
-      roundUsd(80_000 * 5e-6 + 20_000 * 5e-7 + 10_000 * 3e-5)
+      roundUsd(80_000 * 4e-6 + 20_000 * 4e-7 + 10_000 * 2e-5)
     );
   });
 
@@ -102,7 +102,7 @@ describe("CodexBar parity pricing", () => {
     ]);
 
     expect(estimate.estimated_cost_usd).toBe(
-      roundUsd(200_000 * 1e-5 + 100_000 * 1e-6 + 1_000 * 4.5e-5)
+      roundUsd(200_000 * 8e-6 + 100_000 * 8e-7 + 1_000 * 3e-5)
     );
   });
 
@@ -117,7 +117,7 @@ describe("CodexBar parity pricing", () => {
       }
     ]);
 
-    expect(estimate.estimated_cost_usd).toBe(roundUsd(80 * 5e-6 + 20 * 5e-7 + 10 * 3e-5));
+    expect(estimate.estimated_cost_usd).toBe(roundUsd(80 * 4e-6 + 20 * 4e-7 + 10 * 2.4e-5));
   });
 
   it("prices GPT-5.6 Luna at its Codex rates", () => {
@@ -125,6 +125,6 @@ describe("CodexBar parity pricing", () => {
       { model: "gpt-5.6-luna", input_tokens: 50_000, cached_input_tokens: 0, output_tokens: 5_000 }
     ]);
 
-    expect(estimate.estimated_cost_usd).toBe(roundUsd(50_000 * 1e-6 + 5_000 * 6e-6));
+    expect(estimate.estimated_cost_usd).toBe(roundUsd(50_000 * 2e-7 + 5_000 * 1.2e-6));
   });
 });

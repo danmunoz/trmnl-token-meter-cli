@@ -19,6 +19,7 @@ interface ClaudeUsageRow {
   input: number;
   cacheRead: number;
   cacheCreation: number;
+  cacheCreation1h: number;
   output: number;
 }
 
@@ -143,6 +144,13 @@ function parseClaudeLine(line: string, path: string): ClaudeUsageRow | null {
 
   const input = numberField(usage.input_tokens);
   const cacheCreation = numberField(usage.cache_creation_input_tokens);
+  // Claude Code splits cache writes by TTL and bills the 1-hour ones at twice the
+  // input rate. Clamp to the lane total so a malformed record cannot bill more
+  // cache creation than the message actually reported.
+  const cacheCreation1h = Math.min(
+    cacheCreation,
+    numberField(objectField(usage.cache_creation)?.ephemeral_1h_input_tokens)
+  );
   const cacheRead = numberField(usage.cache_read_input_tokens);
   const output = numberField(usage.output_tokens);
   if (input === 0 && cacheCreation === 0 && cacheRead === 0 && output === 0) return null;
@@ -166,6 +174,7 @@ function parseClaudeLine(line: string, path: string): ClaudeUsageRow | null {
     input,
     cacheRead,
     cacheCreation,
+    cacheCreation1h,
     output
   };
 }
@@ -196,6 +205,7 @@ function recordFromClaudeRow(row: ClaudeUsageRow): SessionUsageRecord {
     cached_input_tokens: row.cacheRead,
     output_tokens: row.output,
     cache_creation_input_tokens: row.cacheCreation,
+    cache_creation_1h_input_tokens: row.cacheCreation1h,
     cache_read_input_tokens: row.cacheRead,
     long_context: false,
     priority_tier: "base",

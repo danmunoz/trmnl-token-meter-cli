@@ -152,7 +152,8 @@ async function collectSnapshot(
     sources: scan.sources,
     supportedProviders: SUPPORTED_PROVIDERS,
     enabledProviders: scanProviders,
-    providerStatuses: scan.providerStatuses
+    providerStatuses: scan.providerStatuses,
+    codexBar: scan.codexBar
   }),
     providerStatuses: scan.providerStatuses,
   };

@@ -24,6 +24,9 @@ const loadTestConfig = (env: NodeJS.ProcessEnv) =>
   loadConfig({
     TRMNL_TOKEN_METER_OPENCODE_DB: join(String(env.CODEX_HOME ?? tmpdir()), "missing-opencode.db"),
     TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: join(String(env.CODEX_HOME ?? tmpdir()), "missing-claude"),
+    // These suites assert on fixture records, so a real CodexBar install on the
+    // machine running them must not replace the local scan.
+    TRMNL_TOKEN_METER_CODEXBAR: "off",
     ...env
   });
 
@@ -842,6 +845,83 @@ describe("local cost sources", () => {
       warnings: [{ code: "opencode_sqlite_malformed", severity: "warning" }]
     });
     expect(JSON.stringify(malformed)).not.toContain("title");
+  });
+
+  it("reads the Claude cache-creation TTL split", async () => {
+    const root = await makeTempRoot();
+    const claudeConfigRoot = await makeTempRoot();
+    await writeJsonl(join(claudeConfigRoot, "projects", "project-ttl", "stream.jsonl"), [
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-05-15T11:00:00.000Z",
+        sessionId: "claude-ttl-1",
+        requestId: "req_ttl_1",
+        isSidechain: false,
+        message: {
+          id: "msg_ttl_1",
+          model: "claude-opus-4-8",
+          usage: {
+            input_tokens: 10,
+            cache_creation_input_tokens: 1_000,
+            cache_creation: { ephemeral_1h_input_tokens: 700, ephemeral_5m_input_tokens: 300 },
+            cache_read_input_tokens: 20,
+            output_tokens: 5
+          }
+        }
+      }),
+      // A record whose reported 1-hour count exceeds the lane total must not bill
+      // more cache creation than the message actually recorded.
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-05-15T11:00:05.000Z",
+        sessionId: "claude-ttl-1",
+        requestId: "req_ttl_2",
+        isSidechain: false,
+        message: {
+          id: "msg_ttl_2",
+          model: "claude-opus-4-8",
+          usage: {
+            input_tokens: 1,
+            cache_creation_input_tokens: 40,
+            cache_creation: { ephemeral_1h_input_tokens: 999, ephemeral_5m_input_tokens: 0 },
+            cache_read_input_tokens: 0,
+            output_tokens: 1
+          }
+        }
+      }),
+      // No cache_creation object at all: everything stays on the 5-minute rate.
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-05-15T11:00:09.000Z",
+        sessionId: "claude-ttl-1",
+        requestId: "req_ttl_3",
+        isSidechain: false,
+        message: {
+          id: "msg_ttl_3",
+          model: "claude-opus-4-8",
+          usage: {
+            input_tokens: 1,
+            cache_creation_input_tokens: 60,
+            cache_read_input_tokens: 0,
+            output_tokens: 1
+          }
+        }
+      })
+    ]);
+
+    const result = await scanLocalCostSources(
+      loadTestConfig({
+        CODEX_HOME: root,
+        TRMNL_TOKEN_METER_CLAUDE_CONFIG_DIR: claudeConfigRoot,
+        TRMNL_TOKEN_METER_ENABLED_PROVIDERS: "claude"
+      }),
+      { enabledProviders: ["claude"] }
+    );
+
+    const byKey = new Map(result.records.map((record) => [record.dedupe_key, record]));
+    expect(byKey.get("claude:msg_ttl_1:req_ttl_1")?.cache_creation_1h_input_tokens).toBe(700);
+    expect(byKey.get("claude:msg_ttl_2:req_ttl_2")?.cache_creation_1h_input_tokens).toBe(40);
+    expect(byKey.get("claude:msg_ttl_3:req_ttl_3")?.cache_creation_1h_input_tokens).toBe(0);
   });
 
   it("reads Claude assistant usage with CodexBar streaming and privacy behavior", async () => {
