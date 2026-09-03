@@ -15,10 +15,12 @@ const TODAY = "2026-05-15";
 const YESTERDAY = "2026-05-14";
 const FAKE_VERSION = "9.9.9";
 
-// Deliberately a model this collector's bundled catalog does not know. That is the
-// whole point of the CodexBar path: usage priced upstream must reach the snapshot
-// with real dollars, without an entry in src/pricing/models.ts.
-const UNCATALOGUED_MODEL = "claude-fable-5-1";
+// Deliberately a name the bundled catalog will never carry. That is the whole point
+// of the CodexBar path: usage priced upstream must reach the snapshot with real
+// dollars, without an entry in src/pricing/models.ts. A real model id would make
+// this test expire the moment that model is added to the catalog, which is exactly
+// what happened to claude-fable-5-1.
+const UNCATALOGUED_MODEL = "unreleased-model-x1";
 const CATALOGUED_MODEL = "gpt-5";
 
 interface FakeDay {
@@ -275,7 +277,7 @@ describe("CodexBar cost source", () => {
     const week = snapshot.periods.last_7_days;
     expect(week.cost_provenance).toBe("mixed");
     expect(week.cost_catalog_versions).toEqual([
-      "2026-07-12.codexbar-parity",
+      "2026-09-03.codexbar-parity",
       `codexbar-cli-${FAKE_VERSION}`
     ]);
   });

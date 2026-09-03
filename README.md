@@ -82,8 +82,8 @@ Compact representative example:
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-07-12.codexbar-parity"],
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     },
     "last_7_days": {
@@ -93,8 +93,8 @@ Compact representative example:
       "estimated_cost_usd": 5.4321,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-07-12.codexbar-parity"],
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     },
     "last_14_days": {
@@ -104,8 +104,8 @@ Compact representative example:
       "estimated_cost_usd": 8.7654,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-07-12.codexbar-parity"],
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     },
     "last_30_days": {
@@ -115,8 +115,8 @@ Compact representative example:
       "estimated_cost_usd": 16.789,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-07-12.codexbar-parity"],
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     }
   },
@@ -129,8 +129,8 @@ Compact representative example:
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-07-12.codexbar-parity"],
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": [],
       "has_usage": true,
       "is_missing": false
@@ -143,8 +143,8 @@ Compact representative example:
       "estimated_cost_usd": 1.01,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-07-12.codexbar-parity"],
-      "pricing_catalog_version": "2026-07-12.codexbar-parity",
+      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
+      "pricing_catalog_version": "2026-09-03.codexbar-parity",
       "warning_codes": []
     }
   ],
