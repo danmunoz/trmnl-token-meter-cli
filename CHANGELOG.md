@@ -5,7 +5,6 @@
 
 ### Features
 
-* price Codex and Claude usage with a local CodexBar ([e00af25](https://github.com/danmunoz/trmnl-token-meter-cli/commit/e00af25dcd7f288137f7c6e3795c7ea760071d5b))
 * price Codex and Claude usage with a local CodexBar ([18a402c](https://github.com/danmunoz/trmnl-token-meter-cli/commit/18a402cf7bba600a418541771720dbb917df8d1b))
 
 
