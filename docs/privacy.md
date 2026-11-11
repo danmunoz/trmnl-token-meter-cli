@@ -24,10 +24,10 @@ Uploaded usage sections do not include input, output, cache-read, cache-creation
 
 These inputs remain on the local machine and are normalized before aggregation:
 
-- Active Codex session JSONL under `$CODEX_HOME/sessions`
-- Archived Codex session JSONL under `$CODEX_HOME/archived_sessions`
+- Active Codex session JSONL (plain or `.jsonl.zst`) under `$CODEX_HOME/sessions`
+- Archived Codex session JSONL (plain or `.jsonl.zst`) under `$CODEX_HOME/archived_sessions`
 - Normalized OpenCode per-message usage fields for model, timestamp, tokens, and stored cost (assistant `message` rows only, never message or part text) from `~/.local/share/opencode/opencode.db`, or the database selected by `TRMNL_TOKEN_METER_OPENCODE_DB`
-- Claude project JSONL under `CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects`, or `~/.claude/projects`
+- Claude project JSONL under `CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects`, `~/.claude/projects`, Claude Desktop session homes and Cowork `audit.jsonl` logs under `~/Library/Application Support/Claude`, and claude-swap profiles under `~/.claude-swap-backup/sessions`
 - Priority-tier evidence from `$CODEX_HOME/logs_2.sqlite`
 - Optional Pi JSONL under `~/.pi/agent/sessions`, only after opt-in
 
