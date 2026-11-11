@@ -147,7 +147,7 @@ export const estimateUsageCost = (
       : useFullRowThreshold
         ? (model.price.cachedInputUsdPerMillionAboveThreshold ??
           model.price.cachedInputUsdPerMillion ??
-          model.price.inputUsdPerMillion)
+          inputRate)
         : (model.price.cachedInputUsdPerMillion ?? model.price.inputUsdPerMillion);
     const cacheCreationRate = useFullRowThreshold
       ? (model.price.cacheCreationUsdPerMillionAboveThreshold ??
@@ -159,8 +159,15 @@ export const estimateUsageCost = (
       : useFullRowThreshold
         ? (model.price.outputUsdPerMillionAboveThreshold ?? model.price.outputUsdPerMillion)
         : model.price.outputUsdPerMillion;
+    // Astra and GPT-6.1 Sol publish Fast rates for long-context requests: the
+    // standard long-context row times the Fast multiplier.
+    const fastLongContextMultiplier =
+      usage.priority_tier === "priority" && !usePriorityRates && useFullRowThreshold
+        ? (model.price.priorityLongContextMultiplier ?? 1)
+        : 1;
     if (usage.long_context === "unknown") longContextUnknown = true;
     estimatedCost +=
+      fastLongContextMultiplier * (
       priceTokens(
         inputTokens,
         inputRate,
@@ -200,7 +207,7 @@ export const estimateUsageCost = (
           : model.price.outputUsdPerMillionAboveThreshold,
         model.price.thresholdTokens,
         thresholdMode
-      );
+      ));
     knownRows += 1;
     effectiveDates.add(model.effectiveDate);
   }

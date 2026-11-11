@@ -82,8 +82,8 @@ Compact representative example:
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
-      "pricing_catalog_version": "2026-09-03.codexbar-parity",
+      "cost_catalog_versions": ["2026-11-11.codexbar-parity"],
+      "pricing_catalog_version": "2026-11-11.codexbar-parity",
       "warning_codes": []
     },
     "last_7_days": {
@@ -93,8 +93,8 @@ Compact representative example:
       "estimated_cost_usd": 5.4321,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
-      "pricing_catalog_version": "2026-09-03.codexbar-parity",
+      "cost_catalog_versions": ["2026-11-11.codexbar-parity"],
+      "pricing_catalog_version": "2026-11-11.codexbar-parity",
       "warning_codes": []
     },
     "last_14_days": {
@@ -104,8 +104,8 @@ Compact representative example:
       "estimated_cost_usd": 8.7654,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
-      "pricing_catalog_version": "2026-09-03.codexbar-parity",
+      "cost_catalog_versions": ["2026-11-11.codexbar-parity"],
+      "pricing_catalog_version": "2026-11-11.codexbar-parity",
       "warning_codes": []
     },
     "last_30_days": {
@@ -115,8 +115,8 @@ Compact representative example:
       "estimated_cost_usd": 16.789,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
-      "pricing_catalog_version": "2026-09-03.codexbar-parity",
+      "cost_catalog_versions": ["2026-11-11.codexbar-parity"],
+      "pricing_catalog_version": "2026-11-11.codexbar-parity",
       "warning_codes": []
     }
   },
@@ -129,8 +129,8 @@ Compact representative example:
       "estimated_cost_usd": 1.2345,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
-      "pricing_catalog_version": "2026-09-03.codexbar-parity",
+      "cost_catalog_versions": ["2026-11-11.codexbar-parity"],
+      "pricing_catalog_version": "2026-11-11.codexbar-parity",
       "warning_codes": [],
       "has_usage": true,
       "is_missing": false
@@ -143,8 +143,8 @@ Compact representative example:
       "estimated_cost_usd": 1.01,
       "cost_status": "known",
       "cost_provenance": "local_catalog",
-      "cost_catalog_versions": ["2026-09-03.codexbar-parity"],
-      "pricing_catalog_version": "2026-09-03.codexbar-parity",
+      "cost_catalog_versions": ["2026-11-11.codexbar-parity"],
+      "pricing_catalog_version": "2026-11-11.codexbar-parity",
       "warning_codes": []
     }
   ],
@@ -324,9 +324,10 @@ This is useful for local development and manual testing. The public setup flow s
 
 ### Pricing Catalog Drift
 
-The bundled pricing catalog in `src/pricing/models.ts` is a hand-maintained port of
-[CodexBar](https://github.com/steipete/CodexBar)'s rate card, so it drifts whenever a
-provider ships a model or changes a price. If you have the CodexBar CLI installed, this
+The bundled pricing catalog (`src/pricing/models.ts` and the per-vendor tables in
+`src/pricing/catalog/`) is a hand-maintained port of
+[CodexBar](https://github.com/steipete/CodexBar)'s rate card, last synced with CodexBar
+0.84.0, so it drifts whenever a provider ships a model or changes a price. If you have the CodexBar CLI installed, this
 check compares the catalog against it:
 
 ```bash
@@ -334,7 +335,9 @@ pnpm test:oracle
 ```
 
 It fails when CodexBar prices a model the catalog does not, and when the two disagree on
-the price of the same tokens. It is opt-in and excluded from `pnpm test` because it reads
+the price of the same tokens. Wherever this collector's scanners counted exactly the tokens
+CodexBar did for a day and model, it also prices those records request by request and
+requires CodexBar's cost to the cent. It is opt-in and excluded from `pnpm test` because it reads
 whatever usage history the machine happens to have; it skips itself when CodexBar is not
 installed. Nothing it reads leaves the machine.
 
@@ -414,7 +417,7 @@ priced it in `cost_provenance`:
 | `none` | No cost figure is available for this row. |
 
 `cost_catalog_versions` names the exact engines, for example
-`["codexbar-cli-0.56.3"]`.
+`["codexbar-cli-0.84.0"]`.
 
 ### Using a local CodexBar
 
@@ -452,11 +455,11 @@ By default, the CLI reads Codex usage from `CODEX_HOME` when set, otherwise `~/.
 
 Expected local inputs:
 
-- `$CODEX_HOME/sessions/**/*.jsonl`
-- `$CODEX_HOME/archived_sessions/**/*.jsonl`
+- `$CODEX_HOME/sessions/**/*.jsonl` and `**/*.jsonl.zst` (rollouts Codex compressed; read on Node 22.15+)
+- `$CODEX_HOME/archived_sessions/**/*.jsonl` and `**/*.jsonl.zst`
 - `$CODEX_HOME/logs_2.sqlite` for priority-tier cost evidence
 - OpenCode SQLite database at `~/.local/share/opencode/opencode.db`
-- Claude project JSONL under `CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects`, or `~/.claude/projects` when present
+- Claude project JSONL under `CLAUDE_CONFIG_DIR/projects`, or by default `~/.config/claude/projects`, `~/.claude/projects`, Claude Desktop session homes and Cowork `audit.jsonl` logs under `~/Library/Application Support/Claude/{local-agent-mode-sessions,claude-code-sessions}`, and claude-swap profiles under `~/.claude-swap-backup/sessions/<N>-<name>/projects`, when present
 - `~/.pi/agent/sessions/**/*.jsonl` only when Pi session merging is explicitly enabled
 
 To read another Codex directory:

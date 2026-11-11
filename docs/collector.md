@@ -103,11 +103,11 @@ CODEX_HOME=/path/to/codex-home npx trmnl-token-meter collect
 Only expected local usage inputs are scanned, and only for providers enabled for
 this device in the web configuration:
 
-- `$CODEX_HOME/sessions/**/*.jsonl`
-- `$CODEX_HOME/archived_sessions/**/*.jsonl`
+- `$CODEX_HOME/sessions/**/*.jsonl` and `**/*.jsonl.zst` (rollouts Codex compressed; read on Node 22.15+)
+- `$CODEX_HOME/archived_sessions/**/*.jsonl` and `**/*.jsonl.zst`
 - `$CODEX_HOME/logs_2.sqlite` for priority-tier cost evidence
 - OpenCode SQLite database at `~/.local/share/opencode/opencode.db`
-- Claude project JSONL under `CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects`, or `~/.claude/projects` when present
+- Claude project JSONL under `CLAUDE_CONFIG_DIR/projects`, or by default `~/.config/claude/projects`, `~/.claude/projects`, Claude Desktop session homes and Cowork `audit.jsonl` logs under `~/Library/Application Support/Claude/{local-agent-mode-sessions,claude-code-sessions}`, and claude-swap profiles under `~/.claude-swap-backup/sessions/<N>-<name>/projects`, when present
 - `~/.pi/agent/sessions/**/*.jsonl` only when Pi merging is explicitly enabled
 
 To read a specific OpenCode SQLite database:
@@ -138,6 +138,21 @@ the first owned cumulative total minus its per-turn usage equals the pre-boundar
 When Codex records both per-turn and cumulative token counters, the collector tracks raw and
 counted totals separately. It suppresses exact replays, uses a monotonic watermark, and contains
 interleaved counter regressions so lineage switches cannot replay an already-counted gap.
+
+Newer Codex also writes a `token_usage_record` per model response. Following CodexBar 0.84,
+those records are authoritative: a record counts when it belongs to the rollout's own thread
+and session, once per `response_id`, and the `token_count` that mirrors it (same request size
+in the same turn, matched by thread counter, by time, or by an exact counter advance) is
+dropped. A `token_count` with no record behind it still counts the legacy way. A session is
+keyed by the rollout's own thread id (`session_meta.payload.id`), not the shared-tree
+`session_id`, and duplicates are removed per request rather than per file, so every page of a
+thread Codex split across files counts. Turns started after `thread_settings_applied` set
+`service_tier: "priority"` are priced at Fast-tier rates.
+
+Claude rows are deduplicated by message and request id (`requestId` or `request_id`), or by
+session and message id when a proxy omits the request id. A proxy's incomplete estimate
+(`stop_reason: null`, input but no output, and no cache lanes) never counts and never replaces
+the complete row for the same request.
 
 For disabled providers, the collector performs only a content-free availability
 check and uploads provider status metadata such as `available`, `missing`,

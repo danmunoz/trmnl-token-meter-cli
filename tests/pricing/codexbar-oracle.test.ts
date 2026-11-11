@@ -10,6 +10,8 @@ import {
 import { estimateUsageCost, findPricingModel } from "../../src/pricing/index.js";
 import { readClaudeProjectSource } from "../../src/cost-sources/claude-projects.js";
 import { loadConfig } from "../../src/config.js";
+import { scanLocalCostSources } from "../../src/cost-scan.js";
+import type { SessionUsageRecord } from "../../src/types.js";
 
 /**
  * Differential check of this collector's ported pricing catalog against the
@@ -77,6 +79,22 @@ const oneHourCacheShare = new Map<string, number>();
 
 const shareKey = (date: string, model: string): string => `${date}:${model}`;
 
+/**
+ * This collector's own per-request records, grouped by provider, day, and model.
+ * Where their token total equals CodexBar's for the same day and model, both
+ * scanners counted the same requests, so pricing those records request by request
+ * (long context, Fast tier, and cache TTL included) must reproduce CodexBar's cost.
+ */
+const localRecords = new Map<string, SessionUsageRecord[]>();
+const localKey = (provider: string, date: string, model: string): string => `${provider}:${date}:${model}`;
+
+const recordTokens = (record: SessionUsageRecord): number =>
+  record.input_tokens +
+  record.output_tokens +
+  (record.source_provider === "claude"
+    ? (record.cache_read_input_tokens ?? 0) + (record.cache_creation_input_tokens ?? 0)
+    : 0);
+
 const oracleRequested = (): boolean => process.env.CODEXBAR_ORACLE === "on";
 
 beforeAll(async () => {
@@ -94,6 +112,14 @@ beforeAll(async () => {
     });
   } catch (error) {
     scanError = error instanceof Error ? error : new Error(String(error));
+  }
+
+  const local = await scanLocalCostSources(loadConfig({ ...process.env, TRMNL_TOKEN_METER_CODEXBAR: "off" }), {
+    enabledProviders: ["codex", "claude"]
+  });
+  for (const record of local.records) {
+    const key = localKey(record.source_provider ?? "codex", record.local_date, record.model);
+    localRecords.set(key, [...(localRecords.get(key) ?? []), record]);
   }
 
   const totals = new Map<string, { oneHour: number; total: number }>();
@@ -208,7 +234,53 @@ const comparableDays = (): ComparedDay[] =>
     })
   );
 
+interface ReconciledDay {
+  label: string;
+  ours: number | null;
+  theirs: number;
+}
+
+/** Day-models where this collector counted exactly the tokens CodexBar did. */
+const reconciledDays = (): ReconciledDay[] =>
+  payloads.flatMap((payload) =>
+    payload.daily.flatMap((day) =>
+      day.modelBreakdowns.flatMap((breakdown) => {
+        if (breakdown.cost === null || breakdown.totalTokens === 0) return [];
+        const records = localRecords.get(localKey(payload.provider, day.date, breakdown.modelName)) ?? [];
+        const tokens = records.reduce((sum, record) => sum + recordTokens(record), 0);
+        if (tokens !== breakdown.totalTokens) return [];
+        return [
+          {
+            label: `${payload.provider} ${day.date} ${breakdown.modelName}`,
+            ours: estimateUsageCost(records).estimated_cost_usd,
+            theirs: breakdown.cost
+          }
+        ];
+      })
+    )
+  );
+
 describe("CodexBar pricing oracle", () => {
+  it(
+    "matches CodexBar request by request wherever both counted the same tokens",
+    ({ skip }) => {
+      if (!requireOracle(skip)) return;
+
+      const reconciled = reconciledDays();
+      const drift = reconciled.flatMap(({ label, ours, theirs }) => {
+        if (ours === null) return [`${label}: no local price, CodexBar $${theirs}`];
+        if (Math.abs(ours - theirs) <= Math.max(0.01, theirs * RELATIVE_TOLERANCE)) return [];
+        return [
+          `${label}: ours $${ours.toFixed(4)} vs CodexBar $${theirs.toFixed(4)} (${(ours / theirs).toFixed(4)}x)`
+        ];
+      });
+
+      expect(reconciled.length, "no day-model reconciled with CodexBar's token counts").toBeGreaterThan(0);
+      expect(drift, `per-request pricing differs from CodexBar ${version}`).toEqual([]);
+    },
+    ORACLE_TIMEOUT_MS
+  );
+
   it(
     "prices every model CodexBar prices",
     ({ skip }) => {
@@ -292,8 +364,20 @@ describe("CodexBar pricing oracle", () => {
 
       // Per-request surcharges explain a modest shortfall. A large one means the
       // catalog's rates are too low, which the one-sided check above cannot see.
+      // Day-models reconciled request by request are already proven exactly; a
+      // long-context-heavy day can sit far below its base-rate aggregate there.
+      // Where CodexBar saw only part of a day this collector counted (rollouts Codex
+      // compressed before CodexBar first read them), the mix of requests behind its
+      // figure is unknown, so a base-rate aggregate cannot judge rates either.
+      const proven = new Set(reconciledDays().map((item) => item.label));
       const shortfall = comparableDays().flatMap(({ provider, day, model, ours, theirs }) => {
         if (ours === null || theirs === 0) return [];
+        if (proven.has(`${provider} ${day.date} ${model}`)) return [];
+        const localTokens = (localRecords.get(localKey(provider, day.date, model)) ?? []).reduce(
+          (sum, record) => sum + recordTokens(record),
+          0
+        );
+        if (localTokens > day.totalTokens) return [];
         const ratio = ours / theirs;
         if (ratio >= UNDERPRICING_FLOOR) return [];
         return [

@@ -277,7 +277,7 @@ describe("CodexBar cost source", () => {
     const week = snapshot.periods.last_7_days;
     expect(week.cost_provenance).toBe("mixed");
     expect(week.cost_catalog_versions).toEqual([
-      "2026-09-03.codexbar-parity",
+      "2026-11-11.codexbar-parity",
       `codexbar-cli-${FAKE_VERSION}`
     ]);
   });

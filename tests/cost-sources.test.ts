@@ -188,7 +188,7 @@ describe("local cost sources", () => {
     expect(result.records.map((item) => item.output_tokens)).toEqual([50, 20]);
   });
 
-  it("skips duplicate Codex session files with the same session metadata id", async () => {
+  it("collapses an exact copy of a Codex session file", async () => {
     const root = await makeTempRoot();
     const original = [
       JSON.stringify({
@@ -226,29 +226,8 @@ describe("local cost sources", () => {
         }
       })
     ];
-    const duplicate = [
-      JSON.stringify({
-        type: "session_meta",
-        payload: { id: "duplicate-session" }
-      }),
-      JSON.stringify({
-        type: "event_msg",
-        timestamp: "2026-05-15T10:02:00.000Z",
-        payload: {
-          type: "token_count",
-          info: {
-            model: "gpt-5",
-            total_token_usage: {
-              input_tokens: 10_000,
-              cached_input_tokens: 9_000,
-              output_tokens: 1_000
-            }
-          }
-        }
-      })
-    ];
     await writeJsonl(join(root, "sessions", "2026", "05", "15", "a-original.jsonl"), original);
-    await writeJsonl(join(root, "sessions", "2026", "05", "15", "b-duplicate.jsonl"), duplicate);
+    await writeJsonl(join(root, "sessions", "2026", "05", "15", "b-copy.jsonl"), original);
 
     const result = await scanLocalCostSources(loadTestConfig({ CODEX_HOME: root }));
 
@@ -259,7 +238,7 @@ describe("local cost sources", () => {
     expect(result.warnings).toContainEqual({
       code: "duplicate_records_skipped",
       severity: "warning",
-      count: 1
+      count: 2
     });
   });
 
