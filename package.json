@@ -56,16 +56,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.1.1",
-    "@typescript-eslint/eslint-plugin": "^8.33.1",
-    "@typescript-eslint/parser": "^8.60.1",
-    "eslint": "^10.4.1",
-    "tsup": "^8.5.0",
-    "tsx": "^4.22.4",
+    "@types/node": "^26.6.6",
+    "@typescript-eslint/eslint-plugin": "^8.72.2",
+    "@typescript-eslint/parser": "^8.72.2",
+    "eslint": "^10.14.0",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.0",
-    "vitest": "^4.1.8"
+    "vitest": "^5.1.0"
   },
   "dependencies": {
-    "@clack/prompts": "^1.4.0"
+    "@clack/prompts": "^1.9.0"
   }
 }

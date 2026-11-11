@@ -1,3 +1,4 @@
+import type { CANCEL_SYMBOL } from "@clack/prompts";
 import { confirm as clackConfirm, isCancel, select, text } from "@clack/prompts";
 
 type MenuValue = string | number | boolean;
@@ -19,7 +20,7 @@ export function isPromptCancelledError(error: unknown): error is PromptCancelled
   return error instanceof PromptCancelledError;
 }
 
-function unwrapPrompt<T>(result: T | symbol): T {
+function unwrapPrompt<T>(result: T | typeof CANCEL_SYMBOL): T {
   if (isCancel(result)) throw new PromptCancelledError();
   return result;
 }
@@ -67,7 +68,7 @@ export async function selectMenu<T extends MenuValue>(
       label: option.label,
       ...(option.hint ? { hint: option.hint } : {})
     }))
-  } as never)) as T | symbol;
+  } as never)) as T | typeof CANCEL_SYMBOL;
   if (isCancel(selection)) return undefined;
   return selection;
 }
