@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.1](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.5.0...trmnl-token-meter-0.5.1) (2026-11-11)
+
+
+### Features
+
+* **pricing:** sync bundled catalog with CodexBar 0.84.0 ([6c943bc](https://github.com/danmunoz/trmnl-token-meter-cli/commit/6c943bc8f29d231f3f676ced71758c61031f7057))
+
+
+### Bug Fixes
+
+* **claude:** match CodexBar 0.84.0 request identity and roots ([a4de800](https://github.com/danmunoz/trmnl-token-meter-cli/commit/a4de80086763414fd75f34c36e390774fb6bc5e1))
+* **codex:** count per-request ledger, paged threads, and zst rollouts ([5d7c2da](https://github.com/danmunoz/trmnl-token-meter-cli/commit/5d7c2dab5a58d89a628ee996f368f11cae6a9198))
+* match CodexBar 0.84.0 counting and pricing without CodexBar installed ([e245e60](https://github.com/danmunoz/trmnl-token-meter-cli/commit/e245e60db2bab17c4adda90712aadaf22aa93197))
+
+
+### Miscellaneous Chores
+
+* release 0.5.1 ([49269fb](https://github.com/danmunoz/trmnl-token-meter-cli/commit/49269fbe238905fd347c66e084e22bbe6578cc8d))
+
 ## [0.5.0](https://github.com/danmunoz/trmnl-token-meter-cli/compare/trmnl-token-meter-0.4.4...trmnl-token-meter-0.5.0) (2026-09-03)
 
 
