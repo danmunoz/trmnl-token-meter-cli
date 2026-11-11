@@ -1,8 +1,8 @@
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { CollectorConfig } from "./config.js";
+import { claudeProjectRoots } from "./cost-sources/claude-roots.js";
 import { SUPPORTED_PROVIDERS } from "./source-providers.js";
 import type { ProviderStatus, SourceProvider, WarningCode } from "./types.js";
 
@@ -28,11 +28,6 @@ const pathStatus = async (path: string, provider: SourceProvider): Promise<Provi
   }
 };
 
-const defaultClaudeRoots = (config: CollectorConfig): string[] => {
-  if (config.claudeProjectsRoots?.length) return config.claudeProjectsRoots;
-  return [join(homedir(), ".config", "claude", "projects"), join(homedir(), ".claude", "projects")];
-};
-
 async function probeCodex(config: CollectorConfig): Promise<ProviderStatus> {
   return pathStatus(join(config.codexHome, "sessions"), "codex");
 }
@@ -42,7 +37,7 @@ async function probeOpenCode(config: CollectorConfig): Promise<ProviderStatus> {
 }
 
 async function probeClaude(config: CollectorConfig): Promise<ProviderStatus> {
-  for (const root of defaultClaudeRoots(config)) {
+  for (const root of await claudeProjectRoots(config)) {
     const status = await pathStatus(root, "claude");
     if (status.status === "available") {
       return status;

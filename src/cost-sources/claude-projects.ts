@@ -1,10 +1,10 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { CollectorConfig } from "../config.js";
 import { findPricingModel } from "../pricing/index.js";
 import type { CollectorWarning, SessionUsageRecord } from "../types.js";
 import { warning } from "../warnings.js";
+import { claudeProjectRoots } from "./claude-roots.js";
 import { localDateKey, type JsonlSourceResult } from "./jsonl.js";
 
 interface ClaudeUsageRow {
@@ -12,6 +12,8 @@ interface ClaudeUsageRow {
   timestamp: Date;
   model: string;
   sessionId: string;
+  /** Session id as recorded; absent when the row carried none. */
+  recordedSessionId?: string;
   messageId?: string;
   requestId?: string;
   isSidechain: boolean;
@@ -21,25 +23,35 @@ interface ClaudeUsageRow {
   cacheCreation: number;
   cacheCreation1h: number;
   output: number;
+  /**
+   * A proxy's cache-unaware `message_start` estimate: `stop_reason: null`, input
+   * but no output, and no cache lanes at all. It never counts, and never displaces
+   * a complete row for the same request.
+   */
+  incomplete: boolean;
 }
 
+const isJsonlName = (name: string): boolean => name.toLowerCase().endsWith(".jsonl");
+
 async function discoverJsonlFiles(root: string, output: string[] = []): Promise<string[]> {
+  // A root may itself be a transcript file (Cowork `audit.jsonl`).
+  if ((await stat(root)).isFile()) {
+    if (isJsonlName(root)) output.push(root);
+    return output;
+  }
   const entries = await readdir(root, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
     const path = join(root, entry.name);
     if (entry.isDirectory()) {
       await discoverJsonlFiles(path, output);
-    } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+    } else if ((entry.isFile() || entry.isSymbolicLink()) && isJsonlName(entry.name)) {
+      // Symlinked transcripts count like CodexBar's; the read loop skips any
+      // link that does not resolve to a regular file.
       output.push(path);
     }
   }
   return output;
-}
-
-function defaultClaudeProjectRoots(config: CollectorConfig): string[] {
-  if (config.claudeProjectsRoots) return config.claudeProjectsRoots;
-  return [join(homedir(), ".config", "claude", "projects"), join(homedir(), ".claude", "projects")];
 }
 
 function numberField(value: unknown): number {
@@ -60,6 +72,19 @@ function booleanField(value: unknown): boolean {
   return false;
 }
 
+const vertexProviderKeys = new Set([
+  "provider",
+  "platform",
+  "backend",
+  "api_provider",
+  "apiprovider",
+  "api_type",
+  "apitype",
+  "source",
+  "vendor",
+  "client"
+]);
+
 function stringLooksVertex(value: string): boolean {
   return value.toLowerCase().includes("vertex");
 }
@@ -68,25 +93,31 @@ function modelNameLooksVertex(model: string): boolean {
   return model.startsWith("claude-") && model.includes("@");
 }
 
+// Matches CodexBar: a Vertex marker in any key, or "vertex" in the string value of
+// a provider-like key. Free-text values (message content, tool output) are never
+// inspected, so a transcript that merely mentions Vertex still counts. Arrays
+// descend into objects only.
 function containsVertexMetadata(value: unknown): boolean {
-  if (typeof value === "string") return stringLooksVertex(value);
-  if (Array.isArray(value)) return value.some(containsVertexMetadata);
-  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((item) => isPlainObject(item) && containsVertexMetadata(item));
+  if (!isPlainObject(value)) return false;
 
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+  for (const [key, item] of Object.entries(value)) {
     const lowerKey = key.toLowerCase();
     if (lowerKey.includes("vertex") || lowerKey.includes("gcp")) return true;
-    if (
-      ["provider", "source", "platform", "service", "backend"].includes(lowerKey) &&
-      typeof item === "string" &&
-      stringLooksVertex(item)
-    ) {
+    if (vertexProviderKeys.has(lowerKey) && typeof item === "string" && stringLooksVertex(item)) {
       return true;
     }
-    if (containsVertexMetadata(item)) return true;
+    if ((Array.isArray(item) || isPlainObject(item)) && containsVertexMetadata(item)) return true;
   }
   return false;
 }
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+const requestIdOf = (object: Record<string, unknown>): string | undefined =>
+  stringField(object.requestId) ?? stringField(object.request_id);
 
 function isVertexAIUsageEntry(object: Record<string, unknown>): boolean {
   const message = objectField(object.message);
@@ -99,9 +130,8 @@ function isVertexAIUsageEntry(object: Record<string, unknown>): boolean {
   const model = stringField(message?.model);
   if (model && modelNameLooksVertex(model)) return true;
 
-  return [object, object.metadata, object.request, object.context, object.client, message?.metadata, message?.request].some(
-    containsVertexMetadata
-  );
+  // The walk from the root already reaches metadata, request, context, and client.
+  return containsVertexMetadata(object);
 }
 
 function normalizeClaudeModel(raw: string): string {
@@ -156,17 +186,27 @@ function parseClaudeLine(line: string, path: string): ClaudeUsageRow | null {
   if (input === 0 && cacheCreation === 0 && cacheRead === 0 && output === 0) return null;
 
   const messageId = stringField(message.id);
-  const requestId = stringField(object.requestId);
+  // Cowork audit rows spell it `request_id`; the same message in the embedded
+  // transcript uses `requestId`. Reading both makes them one request.
+  const requestId = requestIdOf(object);
+  const recordedSessionId =
+    stringField(object.sessionId) ??
+    stringField(object.session_id) ??
+    stringField(objectField(object.metadata)?.sessionId) ??
+    stringField(objectField(message.metadata)?.sessionId);
+  const incomplete =
+    "stop_reason" in message &&
+    message.stop_reason === null &&
+    input > 0 &&
+    output === 0 &&
+    !("cache_read_input_tokens" in usage) &&
+    !("cache_creation_input_tokens" in usage);
   return {
     day: localDateKey(timestamp),
     timestamp,
     model: normalizeClaudeModel(model),
-    sessionId:
-      stringField(object.sessionId) ??
-      stringField(object.session_id) ??
-      stringField(objectField(object.metadata)?.sessionId) ??
-      stringField(objectField(message.metadata)?.sessionId) ??
-      "unknown",
+    sessionId: recordedSessionId ?? "unknown",
+    ...(recordedSessionId ? { recordedSessionId } : {}),
     ...(messageId ? { messageId } : {}),
     ...(requestId ? { requestId } : {}),
     isSidechain: booleanField(object.isSidechain),
@@ -175,15 +215,29 @@ function parseClaudeLine(line: string, path: string): ClaudeUsageRow | null {
     cacheRead,
     cacheCreation,
     cacheCreation1h,
-    output
+    output,
+    incomplete
   };
 }
 
+/**
+ * Request identity, as in CodexBar: message + request id when both exist,
+ * otherwise session + message id so a proxy's repeated snapshots of one message
+ * count once. The two key spaces never collide. Rows with neither stay unkeyed.
+ */
 function inFileKey(row: ClaudeUsageRow): string | null {
-  return row.messageId && row.requestId ? `${row.messageId}:${row.requestId}` : null;
+  if (row.messageId && row.requestId) return `${row.messageId}:${row.requestId}`;
+  if (row.messageId && row.recordedSessionId) return `session:${row.recordedSessionId}:${row.messageId}`;
+  return null;
+}
+
+/** Within one file the last row wins, except that an incomplete row never replaces a complete one. */
+function inFileCandidateWins(candidate: ClaudeUsageRow, existing: ClaudeUsageRow): boolean {
+  return !candidate.incomplete || existing.incomplete;
 }
 
 function candidateWins(candidate: { path: string; row: ClaudeUsageRow }, existing: { path: string; row: ClaudeUsageRow }): boolean {
+  if (candidate.row.incomplete !== existing.row.incomplete) return existing.row.incomplete;
   if (candidate.row.isSidechain !== existing.row.isSidechain) return existing.row.isSidechain;
   if (candidate.row.pathRole !== existing.row.pathRole) return existing.row.pathRole === "subagent";
   return candidate.path < existing.path;
@@ -215,7 +269,7 @@ function recordFromClaudeRow(row: ClaudeUsageRow): SessionUsageRecord {
 
 export async function readClaudeProjectSource(config: CollectorConfig): Promise<JsonlSourceResult> {
   const files: string[] = [];
-  for (const root of defaultClaudeProjectRoots(config)) {
+  for (const root of await claudeProjectRoots(config)) {
     try {
       files.push(...(await discoverJsonlFiles(root)));
     } catch {
@@ -247,7 +301,8 @@ export async function readClaudeProjectSource(config: CollectorConfig): Promise<
           if (!row) continue;
           const key = inFileKey(row);
           if (key) {
-            fileKeyedRows.set(key, row);
+            const existing = fileKeyedRows.get(key);
+            if (!existing || inFileCandidateWins(row, existing)) fileKeyedRows.set(key, row);
           } else {
             fileUnkeyedRows.push(row);
           }
@@ -267,7 +322,10 @@ export async function readClaudeProjectSource(config: CollectorConfig): Promise<
     }
   }
 
-  const rows = [...keyedRows.values()].map((value) => value.row).concat(unkeyedRows);
+  const rows = [...keyedRows.values()]
+    .map((value) => value.row)
+    .concat(unkeyedRows)
+    .filter((row) => !row.incomplete);
   const warnings: CollectorWarning[] = malformed > 0 ? [warning("malformed_records_skipped", malformed)] : [];
   return {
     records: rows.map(recordFromClaudeRow),
