@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import * as zlib from "node:zlib";
 import { applyForkLedger, forkWarnings } from "../forks.js";
 import {
   mergeTokenUsageContext,
@@ -16,6 +17,7 @@ import type {
   WarningCode
 } from "../types.js";
 import { warning } from "../warnings.js";
+import { CodexLedgerCollector, mergeLedgerRows } from "./codex-ledger.js";
 
 export interface JsonlSourceResult {
   records: SessionUsageRecord[];
@@ -37,30 +39,59 @@ export const nextLocalDate = (date: string, days = 1): string => {
   return localDateKey(value);
 };
 
+const compressedSuffix = ".zst";
+
+/**
+ * Codex compresses cold rollouts in place (`X.jsonl` -> `X.jsonl.zst`). CodexBar
+ * keeps the usage it parsed while the file was plain; this collector is stateless,
+ * so it reads the archive instead. A plain file always wins over its archive.
+ */
 async function discoverJsonlFiles(dir: string, output: string[] = []): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });
+  const names = new Set(entries.map((entry) => entry.name));
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
     const path = join(dir, entry.name);
+    const name = entry.name.toLowerCase();
     if (entry.isDirectory()) {
       await discoverJsonlFiles(path, output);
-    } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+    } else if (!entry.isFile() && !entry.isSymbolicLink()) {
+      continue;
+    } else if (name.endsWith(".jsonl")) {
+      output.push(path);
+    } else if (
+      name.endsWith(`.jsonl${compressedSuffix}`) &&
+      !names.has(entry.name.slice(0, -compressedSuffix.length)) &&
+      zstdDecompress
+    ) {
       output.push(path);
     }
   }
   return output;
 }
 
+// `zstdDecompressSync` ships in Node 22.15+/23.8+. Older runtimes skip archives.
+const zstdDecompress = (zlib as { zstdDecompressSync?: (input: Buffer) => Buffer }).zstdDecompressSync;
+
+const readJsonlText = async (file: string): Promise<string> => {
+  if (!file.toLowerCase().endsWith(compressedSuffix)) return readFile(file, "utf8");
+  if (!zstdDecompress) return "";
+  return zstdDecompress(await readFile(file)).toString("utf8");
+};
+
 const eventDedupeKey = (event: UsageEvent): string =>
-  [
-    event.session_id,
-    event.turn_id ?? "",
-    event.timestamp.toISOString(),
-    event.model,
-    event.input_tokens,
-    event.cached_input_tokens,
-    event.output_tokens
-  ].join(":");
+  // A ledger row is identified by its response, like CodexBar's request identity.
+  event.response_id
+    ? `${event.session_id}:response:${event.response_id}`
+    : [
+        event.session_id,
+        event.turn_id ?? "",
+        event.timestamp.toISOString(),
+        event.model,
+        event.input_tokens,
+        event.cached_input_tokens,
+        event.output_tokens
+      ].join(":");
 
 export const recordFromEvent = (
   event: UsageEvent,
@@ -96,6 +127,7 @@ interface UsageSnapshot {
 
 interface ParsedUsageFile {
   events: UsageEvent[];
+  ledger: CodexLedgerCollector;
   sessionId?: string;
   parentId?: string;
   forkTimestamp?: string;
@@ -355,13 +387,15 @@ export async function readJsonlUsageSource(
       if (!(await stat(file)).isFile()) continue;
       const fileEvents: UsageEvent[] = [];
       const context: TokenUsageContext = {};
+      const ledger = new CodexLedgerCollector();
       const records: Record<string, unknown>[] = [];
       const eventsByLine: Array<{ event: UsageEvent; line: number }> = [];
-      for (const line of (await readFile(file, "utf8")).split(/\r?\n/)) {
+      for (const line of (await readJsonlText(file)).split(/\r?\n/)) {
         if (!line.trim()) continue;
         try {
           const record = JSON.parse(line) as Record<string, unknown>;
           records.push(record);
+          ledger.observe(record);
           const result = normalizeTokenUsageRecord(record, context);
           if (result.context) mergeTokenUsageContext(context, result.context);
           if (result.event) eventsByLine.push({ event: result.event, line: records.length });
@@ -410,6 +444,7 @@ export async function readJsonlUsageSource(
           : fileEvents.find((event) => event.session_id !== "unknown")?.session_id;
       parsedFiles.push({
         events: fileEvents,
+        ledger,
         snapshots: snapshotsFromEvents(fileEvents),
         ...(sessionId ? { sessionId } : {}),
         ...(context.parentId ? { parentId: context.parentId } : {}),
@@ -429,7 +464,6 @@ export async function readJsonlUsageSource(
   }
 
   const events: UsageEvent[] = [];
-  const seenSessionIds = new Set<string>();
   let duplicateRecords = 0;
   let ambiguousForkCount = 0;
   for (const parsed of parsedFiles) {
@@ -440,16 +474,29 @@ export async function readJsonlUsageSource(
     const adjustedEvents = applyInheritedTotals(parsed.events, parsed.ownedSuffixBaseline ?? inherited);
     const ledger = applyForkLedger(adjustedEvents);
     ambiguousForkCount += ledger.ambiguousForkCount;
-    const nonZeroEvents = ledger.events.filter(hasUsage);
-    if (parsed.sessionId && seenSessionIds.has(parsed.sessionId)) {
-      duplicateRecords += nonZeroEvents.length;
-      continue;
-    }
-    if (parsed.sessionId) seenSessionIds.add(parsed.sessionId);
+    const nonZeroEvents = mergeLedgerRows(
+      ledger.events.filter(hasUsage),
+      parsed.ledger,
+      parsed.sessionId ?? "unknown"
+    ).filter(hasUsage);
     events.push(...nonZeroEvents);
   }
 
-  const records = events.map((event) => recordFromEvent(event, kind));
+  // Deduplicate per request rather than per session: Codex pages a long thread
+  // across several files that share its id, and each page holds distinct
+  // requests. Exact copies (an active rollout and its archived twin) still
+  // collapse, since a ledger row is keyed by response and a legacy row by its
+  // turn, time, model, and size.
+  const records: SessionUsageRecord[] = [];
+  const seenKeys = new Set<string>();
+  for (const record of events.map((event) => recordFromEvent(event, kind))) {
+    if (seenKeys.has(record.dedupe_key)) {
+      duplicateRecords += 1;
+      continue;
+    }
+    seenKeys.add(record.dedupe_key);
+    records.push(record);
+  }
   const warnings = [
     ...(malformed > 0 ? [warning(malformedCode, malformed)] : []),
     ...(duplicateRecords > 0 ? [warning("duplicate_records_skipped", duplicateRecords)] : []),

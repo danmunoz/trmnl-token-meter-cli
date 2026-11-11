@@ -83,6 +83,16 @@ export interface UsageEvent extends TokenUsage {
   long_context?: boolean | "unknown";
   priority_tier?: "base" | "priority" | "unknown";
   record_kind: "delta" | "cumulative";
+  /**
+   * Local-only: the request size a Codex `token_count` line reported
+   * (`last_token_usage`), kept so the line can be paired with its per-request
+   * ledger record. Never part of an uploaded record.
+   */
+  request_usage?: TokenUsage;
+  /** Local-only: the same line's raw `total_token_usage`, the thread counter at that request. */
+  request_thread_total?: TokenUsage;
+  /** Local-only: the response a Codex ledger record belongs to. */
+  response_id?: string;
 }
 
 export interface UsagePeriod {

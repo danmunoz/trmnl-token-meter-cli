@@ -124,15 +124,13 @@ function sessionContext(object: Record<string, unknown>): TokenUsageContext | un
     ""
   );
   return {
-    sessionId: stringField(
-      payload?.session_id ??
-        payload?.sessionId ??
-        payload?.id ??
-        object.session_id ??
-        object.sessionId ??
-        object.id,
-      ""
-    ),
+    // The rollout's own thread id comes first, as in CodexBar 0.84: newer Codex
+    // writes a shared-tree `session_id` that differs from the thread id, and keying
+    // on it would merge distinct threads and miss forks of them.
+    sessionId:
+      [payload?.id, object.id, payload?.session_id, payload?.sessionId, object.session_id, object.sessionId]
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
+        .find(Boolean) ?? "",
     branchId: stringField(payload?.branch_id ?? payload?.branchId ?? object.branch_id, ""),
     parentId,
     forkTimestamp: parentId
@@ -237,6 +235,10 @@ export function normalizeTokenUsageRecord(
     record_kind: lastUsage ? "delta" : totalUsage ? "cumulative" : "delta"
   };
   if (cumulativeUsage) event.cumulative_usage = cumulativeUsage;
+  if (lastUsage && nestedTokenCount) {
+    event.request_usage = tokenUsage;
+    if (cumulativeUsage) event.request_thread_total = cumulativeUsage;
+  }
   event.long_context =
     booleanOrUnknown(
       usageObject.long_context ??
